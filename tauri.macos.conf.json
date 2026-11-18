@@ -1,0 +1,21 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Atmosphere",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 620,
+        "center": true,
+        "backgroundColor": "#0b0d14",
+        "dragDropEnabled": false,
+        "decorations": true,
+        "shadow": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
+      }
+    ]
+  }
+}

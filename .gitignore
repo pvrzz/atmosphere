@@ -1,0 +1,9 @@
+/target
+/gen
+*.part
+*.ytdl
+AtmosphereData/
+portable
+portable.txt
+Thumbs.db
+.DS_Store

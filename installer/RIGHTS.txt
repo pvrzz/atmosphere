@@ -1,0 +1,19 @@
+ATMOSPHERE: YOUR RESPONSIBILITY
+
+Atmosphere saves audio and video you're allowed to keep, and plays your own music library.
+
+By installing Atmosphere, you agree that:
+
+1. You'll only download media you own, that the rights holder has allowed you to download, or that's under a licence that permits it, such as artist-enabled downloads or Creative Commons.
+
+2. You understand that downloading without permission can infringe copyright and break a site's terms of use, and that you're responsible for how you use Atmosphere.
+
+3. You won't share downloaded media unless its licence or the rights holder allows it.
+
+Atmosphere never bypasses DRM or paywalls, and skips preview-only media. Artists recovering their own uploads can enable downloads on their tracks and choose "Original file" to get their uploaded master.
+
+Atmosphere downloads two open-source tools on first run, both from their official releases with checksum verification:
+- yt-dlp (Unlicense): https://github.com/yt-dlp/yt-dlp
+- ffmpeg (GPL builds): https://github.com/yt-dlp/FFmpeg-Builds
+
+You'll be asked to confirm these points again the first time you open the app.

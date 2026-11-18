@@ -1,0 +1,338 @@
+<!doctype html>
+<!-- atmosphere · index.html · Window markup: onboarding, sidebar, Get / Downloads / Settings views and the save-as menu. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Atmosphere</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="titlebar" id="titlebar" data-tauri-drag-region>
+    <div class="tb-brand" data-tauri-drag-region>
+      <img class="lockup lockup-light" src="assets/lockup-light.svg" alt="Atmosphere" width="132" height="30" draggable="false" />
+      <img class="lockup lockup-dark" src="assets/lockup-dark.svg" alt="Atmosphere" width="132" height="30" draggable="false" />
+    </div>
+    <div class="tb-drag" data-tauri-drag-region></div>
+    <div class="tb-controls" id="winControls">
+      <button class="tb-btn" id="winMin" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5.5h10" /></svg></button>
+      <button class="tb-btn" id="winMax" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" /></svg></button>
+      <button class="tb-btn close" id="winClose" aria-label="Close" title="Close"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" /></svg></button>
+    </div>
+  </header>
+  <div class="shell" id="shell" inert>
+    <aside class="sidebar">
+      <nav class="nav" aria-label="Main">
+        <button class="nav-item" data-nav="get" aria-current="page"><span class="i" data-icon="cloud-download"></span><span>Get</span><kbd>Ctrl K</kbd></button>
+        <button class="nav-item" data-nav="downloads" id="navDownloads">
+          <span class="nav-ring" aria-hidden="true"><svg viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8.5"/><circle class="fill" id="navRing" cx="10" cy="10" r="8.5"/></svg><span class="i" data-icon="download"></span></span>
+          <span>Downloads</span><span class="count" id="navCount" hidden></span>
+        </button>
+      </nav>
+
+      <div class="nav-group">
+        <h2 class="nav-heading">Library</h2>
+        <nav class="nav" aria-label="Library">
+          <button class="nav-item" data-lib="songs"><span class="i" data-icon="music"></span><span>Songs</span></button>
+          <button class="nav-item" data-lib="albums"><span class="i" data-icon="disc"></span><span>Albums</span></button>
+          <button class="nav-item" data-lib="artists"><span class="i" data-icon="microphone-2"></span><span>Artists</span></button>
+          <button class="nav-item" data-lib="liked"><span class="i" data-icon="heart"></span><span>Liked</span></button>
+          <button class="nav-item" data-lib="stats"><span class="i" data-icon="chart-bar"></span><span>Stats</span></button>
+        </nav>
+      </div>
+
+      <div class="nav-group grow">
+        <div class="nav-heading-row">
+          <h2 class="nav-heading">Playlists</h2>
+          <button class="icon-btn" id="newPlaylistBtn" aria-label="New playlist" title="New playlist"><span class="i" data-icon="plus"></span></button>
+        </div>
+        <nav class="nav playlist-nav" id="playlistNav" aria-label="Playlists"></nav>
+        <p class="fetched-empty" id="playlistEmpty">Playlists are folders on this device. Drag songs onto one to add them.</p>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="nav-item" data-nav="settings"><span class="i" data-icon="settings"></span><span>Settings</span></button>
+        <button class="engine-state" id="engineState" data-nav="settings" data-anchor="engine"></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="view view-get" data-view="get">
+        <header class="command">
+          <form class="command-bar" id="commandForm" autocomplete="off">
+            <span class="i command-glyph" id="commandGlyph" data-icon="link"></span>
+            <input id="commandInput" spellcheck="false" placeholder="Paste a link, or search YouTube and SoundCloud" aria-label="Link or search" />
+            <div class="scope" id="searchScope" role="radiogroup" aria-label="Search on" hidden>
+              <button type="button" role="radio" data-scope="youtube" aria-checked="true">YouTube</button>
+              <button type="button" role="radio" data-scope="soundcloud" aria-checked="false">SoundCloud</button>
+            </div>
+            <button class="btn primary" id="commandGo" type="submit"><span class="label">Fetch</span><span class="spin" aria-hidden="true"></span></button>
+          </form>
+          <div class="clip" id="clipChip" hidden>
+            <span class="i" data-icon="clipboard"></span>
+            <span>Copied link</span>
+            <code id="clipUrl"></code>
+            <button class="btn small" id="clipUse">Fetch it</button>
+            <button class="icon-btn" id="clipDismiss" aria-label="Dismiss"><span class="i" data-icon="x"></span></button>
+          </div>
+          <div class="fetched-strip" id="fetchedStrip" hidden>
+            <ul class="fetched-list" id="fetchedList"></ul>
+            <button class="link-btn" id="clearFetched" hidden>Clear</button>
+          </div>
+          <p id="fetchedEmpty" hidden></p>
+        </header>
+
+        <div class="get-scroll" id="getScroll">
+          <div class="banner" id="engineBanner" hidden>
+            <span class="i" data-icon="alert-circle"></span>
+            <div><strong>Atmosphere needs its download engine.</strong> <span id="engineBannerText">yt-dlp reads links from 1,000+ sites. It takes about a minute to set up.</span></div>
+            <button class="btn" id="engineBannerBtn">Set up engine</button>
+          </div>
+
+          <div class="empty-get" id="emptyGet">
+            <div class="empty-art" aria-hidden="true"><img src="assets/mark.svg" alt="" width="120" height="100" /></div>
+            <h1>Paste a link to begin</h1>
+            <p>Drop in anything you have the rights to keep. Atmosphere reads it, shows you exactly what's available, and saves it tagged and named.</p>
+            <ul class="examples">
+              <li><span class="i" data-icon="music"></span><div><strong>A track or video</strong><span>Saved as one file, with its cover and details.</span></div></li>
+              <li><span class="i" data-icon="disc"></span><div><strong>An album, EP or playlist</strong><span>Detected, numbered in order, kept in one folder.</span></div></li>
+              <li><span class="i" data-icon="user-circle"></span><div><strong>A profile or channel</strong><span>Every upload, listed so you can pick.</span></div></li>
+            </ul>
+            <p class="hint">Tip: drag a link onto this window, or press <kbd>Ctrl V</kbd> anywhere.</p>
+          </div>
+
+          <article class="sheet" id="sheet" hidden></article>
+        </div>
+
+        <footer class="commit" id="commit" hidden>
+          <button class="save-as" id="saveAsBtn" aria-haspopup="dialog" aria-expanded="false">
+            <span class="save-as-label">Save as</span>
+            <span class="save-as-value" id="saveAsValue">Best quality</span>
+            <span class="i" data-icon="chevron-down"></span>
+          </button>
+          <button class="dest" id="destBtn" title="Change where downloads are saved">
+            <span class="i" data-icon="folder"></span>
+            <span class="dest-path" id="destPath"></span>
+          </button>
+          <select id="destPlaylist" class="dest-playlist" aria-label="Also add to a playlist" title="Also add finished downloads to a playlist folder"><option value="">No playlist</option></select>
+          <label class="attest">
+            <input type="checkbox" id="attest" />
+            <span id="attestText">I have the rights to this</span>
+          </label>
+          <button class="btn primary big" id="downloadBtn" disabled>Download</button>
+        </footer>
+      </section>
+
+      <section class="view view-library" data-view="library" hidden>
+        <div class="lib-scroll" id="libScroll"><div id="libView"></div></div>
+      </section>
+
+      <section class="view view-downloads" data-view="downloads" hidden>
+        <header class="view-head">
+          <div>
+            <h1>Downloads</h1>
+            <p class="view-sub" id="downloadsSub">Nothing in progress</p>
+          </div>
+          <div class="row">
+            <button class="btn" id="openFolderBtn"><span class="i" data-icon="folder-open"></span>Open folder</button>
+            <button class="btn danger-ghost" id="cancelAllBtn" hidden>Cancel all</button>
+          </div>
+        </header>
+        <div class="downloads-scroll">
+          <section id="activeGroups" class="groups"></section>
+          <section class="history" id="historySection">
+            <div class="history-head">
+              <h2>Recent</h2>
+              <button class="link-btn" id="clearHistory">Clear history</button>
+            </div>
+            <div id="historyList"></div>
+          </section>
+          <div class="empty-downloads" id="emptyDownloads">
+            <span class="i" data-icon="arrow-down-circle"></span>
+            <h2>Nothing here yet</h2>
+            <p>Files you download appear here, with a shortcut to find them on disk.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="view view-settings" data-view="settings" hidden>
+        <header class="view-head">
+          <div><h1>Settings</h1><p class="view-sub">Changes save as you make them.</p></div>
+          <span class="saved" id="savedFlag" aria-live="polite"></span>
+        </header>
+        <div class="settings-scroll">
+          <div class="settings">
+            <h2 id="set-files">Files</h2>
+            <div class="group">
+              <div class="setting">
+                <div><strong>Save to</strong><span id="setDir"></span></div>
+                <button class="btn" id="setDirBtn">Change…</button>
+              </div>
+              <label class="setting"><div><strong>Give albums and playlists their own folder</strong><span>Named “Artist - Album”, or after the playlist.</span></div><input type="checkbox" class="switch" data-key="collectionFolders" /></label>
+              <label class="setting"><div><strong>Number tracks in albums and playlists</strong><span>Keeps files sorted in their original order.</span></div><input type="checkbox" class="switch" data-key="numberTracks" /></label>
+              <div class="setting stack">
+                <div><strong>File names</strong><span>Click a token to add it. Preview: <code id="templatePreview"></code></span></div>
+                <input class="text" data-key="filenameTemplate" id="templateInput" spellcheck="false" />
+                <div class="tokens" id="tokens"></div>
+              </div>
+              <label class="setting"><div><strong>Skip anything downloaded before</strong><span>Remembers what you've saved, even after files are moved.</span></div><input type="checkbox" class="switch" data-key="skipDownloaded" /></label>
+              <div class="setting">
+                <div><strong>Downloads at once</strong><span>Albums and playlists always start in track order.</span></div>
+                <div class="stepper"><button type="button" data-step="-1" aria-label="Fewer">−</button><output id="concValue">3</output><button type="button" data-step="1" aria-label="More">+</button></div>
+              </div>
+            </div>
+
+            <h2 id="set-library">Library</h2>
+            <div class="group" id="libFolders"></div>
+            <div class="group gap-top">
+              <div class="setting"><div><strong>Playlist folders live in</strong><span id="playlistsDir"></span></div></div>
+              <div class="setting" id="hiddenSongs"></div>
+              <label class="setting"><div><strong>Copy songs into playlists</strong><span>Off: songs are hard-linked, so they appear in the folder without using extra space (same drive only). On: real copies, which are best for syncing to phones and USB drives.</span></div><input type="checkbox" class="switch" data-key="playlistCopy" /></label>
+            </div>
+
+            <h2 id="set-lyrics">Lyrics</h2>
+            <p class="set-note">Sources are tried top to bottom until synced lyrics are found. Reorder them with the arrows.</p>
+            <div class="group" id="lyricsProviders"></div>
+            <div class="group gap-top">
+              <div class="setting"><div><strong>Musixmatch API key</strong><span>A developer API key from developer.musixmatch.com (free tier available). Stays on this device.</span></div><input class="text" type="password" data-key="musixmatchKey" placeholder="Not set" spellcheck="false" autocomplete="off" /></div>
+              <label class="setting"><div><strong>Save lyrics with downloads</strong><span>Writes a synced .lrc file next to each song you download, when lyrics are found.</span></div><input type="checkbox" class="switch" data-key="lyricsOnDownload" /></label>
+            </div>
+            <h2 class="sub">Custom sources</h2>
+            <div class="group" id="customProviders"></div>
+
+            <h2 id="set-tags">Tags</h2>
+            <div class="group">
+              <label class="setting"><div><strong>Write metadata and cover art</strong><span>Title, artist, album, track number, date and artwork, plus any edits you make.</span></div><input type="checkbox" class="switch" data-key="embedMetadata" /></label>
+              <label class="setting"><div><strong>Keep chapters</strong><span>When the source has them (mixes, long videos).</span></div><input type="checkbox" class="switch" data-key="embedChapters" /></label>
+            </div>
+
+            <h2 id="set-video">Video</h2>
+            <div class="group">
+              <label class="setting"><div><strong>Embed subtitles</strong><span>When available, in these languages:</span></div><input type="checkbox" class="switch" data-key="embedSubtitles" /></label>
+              <div class="setting"><div><strong>Subtitle languages</strong><span>Comma-separated codes, e.g. <code>en,es</code></span></div><input class="text short" data-key="subtitleLangs" spellcheck="false" /></div>
+              <label class="setting"><div><strong>Cut sponsor segments</strong><span>Uses SponsorBlock on YouTube. Audio downloads also drop non-music sections.</span></div><input type="checkbox" class="switch" data-key="sponsorblock" /></label>
+            </div>
+
+            <h2 id="set-engine">Engine</h2>
+            <div class="group" id="engineGroup">
+              <div class="setting tool" id="toolYtdlp"></div>
+              <div class="setting tool" id="toolFfmpeg"></div>
+              <details class="setting advanced">
+                <summary><strong>Use my own copies</strong><span>Point to yt-dlp or ffmpeg you've installed yourself.</span></summary>
+                <div class="adv-fields">
+                  <label><span>yt-dlp path</span><input class="text" data-key="ytdlpPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
+                  <label><span>ffmpeg path</span><input class="text" data-key="ffmpegPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
+                </div>
+              </details>
+            </div>
+
+            <h2 id="set-network">Network &amp; sign-in</h2>
+            <div class="group">
+              <div class="setting">
+                <div><strong>Use my browser sign-in</strong><span>Lets Atmosphere reach content your account can already see, like your own private uploads. Your sign-in stays in your browser.</span></div>
+                <select data-key="cookiesBrowser">
+                  <option value="">Off</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="firefox">Firefox</option><option value="brave">Brave</option><option value="opera">Opera</option><option value="vivaldi">Vivaldi</option>
+                </select>
+              </div>
+              <div class="setting"><div><strong>Speed limit</strong><span>Blank for no limit. For example <code>2M</code> is 2 MB/s.</span></div><input class="text short" data-key="rateLimit" placeholder="No limit" spellcheck="false" /></div>
+              <div class="setting"><div><strong>Proxy</strong><span>For example <code>socks5://127.0.0.1:1080</code></span></div><input class="text" data-key="proxy" placeholder="None" spellcheck="false" /></div>
+            </div>
+
+            <h2 id="set-app">App</h2>
+            <div class="group">
+              <div class="setting">
+                <div><strong>Appearance</strong><span>Follows Windows unless you choose.</span></div>
+                <div class="seg" data-seg="theme"><button type="button" data-value="system">System</button><button type="button" data-value="light">Light</button><button type="button" data-value="dark">Dark</button></div>
+              </div>
+              <label class="setting"><div><strong>Offer copied links</strong><span>When you switch to Atmosphere with a link copied, offer to fetch it.</span></div><input type="checkbox" class="switch" data-key="watchClipboard" /></label>
+            </div>
+
+            <h2 id="set-storage">Storage</h2>
+            <p class="set-note">Temporary files are removed automatically on every launch and exit. Here's everything else Atmosphere keeps.</p>
+            <div class="group" id="storageList"></div>
+
+            <h2 id="set-rights">Your responsibility</h2>
+            <div class="group">
+              <div class="setting">
+                <div><strong>Rights acknowledgment</strong><span id="rightsInfo"></span></div>
+                <button class="btn danger-ghost" id="revokeBtn">Withdraw</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="player idle" id="player">
+    <div class="np">
+      <div id="npArt"></div>
+      <div class="np-text"><button class="np-title link" id="npTitle">Nothing playing</button><span class="np-artist" id="npArtist"></span></div>
+      <span id="npLike"></span>
+    </div>
+    <div class="transport">
+      <div class="controls">
+        <button class="icon-btn" id="shuffleBtn" aria-label="Shuffle" aria-pressed="false" title="Shuffle"><span class="i" data-icon="arrows-shuffle"></span></button>
+        <button class="icon-btn" id="prevBtn" aria-label="Previous" title="Previous (Ctrl ←)"><span class="i" data-icon="player-skip-back-filled"></span></button>
+        <button class="play-btn" id="playBtn" aria-label="Play"></button>
+        <button class="icon-btn" id="nextBtn" aria-label="Next" title="Next (Ctrl →)"><span class="i" data-icon="player-skip-forward-filled"></span></button>
+        <button class="icon-btn" id="repeatBtn" aria-label="Repeat" aria-pressed="false"></button>
+      </div>
+      <div class="seek-row"><span class="time" id="tCur">0:00</span><input type="range" id="seek" class="range" min="0" max="1000" value="0" aria-label="Seek" /><span class="time" id="tDur">0:00</span></div>
+    </div>
+    <div class="np-tools">
+      <button class="icon-btn" id="fxBtn" aria-label="Sound and effects" aria-pressed="false" aria-expanded="false" title="Sound, presets, pitch and tempo"><span class="i" data-icon="adjustments-horizontal"></span></button>
+      <button class="icon-btn" id="lyricsBtn" aria-label="Lyrics" aria-pressed="false" title="Lyrics (L)"><span class="i" data-icon="microphone"></span></button>
+      <button class="icon-btn" id="queueBtn" aria-label="Queue" aria-pressed="false" title="Queue (Q)"><span class="i" data-icon="list"></span></button>
+      <button class="icon-btn" id="tvBtn" aria-label="TV mode" title="TV mode (F)"><span class="i" data-icon="device-tv"></span></button>
+      <button class="icon-btn" id="muteBtn" aria-label="Mute"></button>
+      <input type="range" id="volume" class="range vol" min="0" max="100" value="85" aria-label="Volume" />
+    </div>
+  </footer>
+
+  <aside class="drawer-panel" id="lyricsPanel" aria-label="Lyrics" hidden></aside>
+  <aside class="drawer-panel" id="queuePanel" aria-label="Queue" hidden></aside>
+  <div class="fx" id="fxPanel" role="dialog" aria-label="Sound and effects" hidden></div>
+  <div class="tv" id="tv" hidden></div>
+
+  <div class="save-menu" id="saveMenu" role="dialog" aria-label="Save as" hidden></div>
+  <div class="menu" id="typeMenu" role="menu" hidden></div>
+
+  <div class="onboarding" id="onboarding" hidden>
+    <div class="ob-card">
+      <img class="ob-mark" src="assets/mark.svg" alt="" width="96" height="80" />
+      <ol class="ob-steps" aria-label="Setup steps"><li class="on" id="obStep1Dot">Your responsibility</li><li id="obStep2Dot">Engine</li></ol>
+
+      <section class="ob-step" id="obStep1">
+        <h1>Welcome to Atmosphere</h1>
+        <p class="lede">It saves audio and video you're allowed to keep. Before you start, please confirm each of these.</p>
+        <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I'll only download media I <b>own</b>, that the <b>rights holder has allowed</b> me to download, or that's under a licence that permits it, such as artist-enabled downloads or Creative Commons.</span></label>
+        <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I understand that downloading without permission can infringe copyright and break a site's terms, and that <b>I'm responsible</b> for how I use Atmosphere.</span></label>
+        <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I won't share downloaded media unless its licence or the rights holder allows it.</span></label>
+        <p class="fine">Atmosphere never bypasses DRM or paywalls, and skips preview-only media.</p>
+        <button class="btn primary big wide" id="obAccept" disabled>Agree and continue</button>
+      </section>
+
+      <section class="ob-step" id="obStep2" hidden>
+        <h1>Set up the engine</h1>
+        <p class="lede">Atmosphere uses two trusted open-source tools: <b>yt-dlp</b> reads links from 1,000+ sites, and <b>ffmpeg</b> converts and tags files. Both are downloaded from their official releases and checksum-verified.</p>
+        <div class="ob-tools" id="obTools"></div>
+        <div class="row end">
+          <button class="btn ghost" id="obSkip">I'll do this later</button>
+          <button class="btn primary big" id="obInstall">Set up both</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+  <script src="player.js"></script>
+  <script src="library.js"></script>
+  <script src="nowplaying.js"></script>
+  <script src="lyrics.js"></script>
+  <script src="stats.js"></script>
+</body>
+</html>
