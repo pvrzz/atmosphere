@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::io::{Read, Write};
 use std::path::Path;
 
-const DATA_FILES: &[&str] = &["library.json", "stats.json", "artists.json", "hidden.json", "history.json", "archive.txt"];
+const DATA_FILES: &[&str] = &["library.json", "stats.json", "artists.json", "hidden.json", "history.json", "archive.txt", "linked.json"];
 const MARKER: &str = "atmosphere-backup.json";
 
 fn artist_photos(data: &Path) -> Vec<String> {

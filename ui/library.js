@@ -335,7 +335,7 @@ function renderPlaylistNav() {
   const lists = Lib.data?.playlists || [];
   nav.replaceChildren(
     ...lists.map((p) => {
-      const b = h("button", { class: "nav-item small", "data-playlist": p.name, onclick: () => openLib("playlist", p.name) }, icon("playlist"), h("span", { class: "nav-label" }, p.name), h("span", { class: "nav-meta" }, String(p.order.length)));
+      const b = h("button", { class: `nav-item small ${p.missing ? "missing" : ""}`, "data-playlist": p.name, title: p.missing ? `Folder not found: ${p.path}` : p.linked ? p.path : null, onclick: () => openLib("playlist", p.name) }, icon(p.missing ? "alert-circle" : p.linked ? "folder" : "playlist"), h("span", { class: "nav-label" }, p.name), h("span", { class: "nav-meta" }, p.missing ? "Missing" : String(p.order.length)));
       b.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-atmo-tracks")) { e.preventDefault(); b.classList.add("drop"); } });
       b.addEventListener("dragleave", () => b.classList.remove("drop"));
       b.addEventListener("drop", (e) => {
@@ -362,7 +362,11 @@ async function addToPlaylist(name, tracks) {
 }
 
 async function removeFromPlaylist(name, tracks) {
-  const ok = await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `The playlist's copy goes to your ${isMac ? "Trash" : "Recycle Bin"}. The song stays in your library.`, "Remove");
+  const pl = (Lib.data?.playlists || []).find((x) => x.name === name);
+  const bin = isMac ? "Trash" : "Recycle Bin";
+  const ok = pl?.linked
+    ? await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `This is your own folder, so the file itself moves from it to your ${bin}. If it's the only copy, it leaves your library too. You can restore it from the ${bin}.`, "Move to " + bin)
+    : await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `The playlist's copy goes to your ${isMac ? "Trash" : "Recycle Bin"}. The song stays in your library.`, "Remove");
   if (!ok) return;
   try {
     await invoke("playlist_remove", { name, ids: tracks.map((t) => t.id) });
@@ -408,6 +412,49 @@ function modal(title, body, actions) {
 }
 
 const confirmBox = (title, text, label) => modal(title, h("p", { class: "muted" }, text), [{ label: "Cancel", value: false }, { label, value: true, primary: true }]);
+
+async function linkFolder() {
+  try {
+    const name = await invoke("playlist_link");
+    if (!name) return;
+    toast(`Added “${name}” as a playlist. Atmosphere won't move or delete the folder.`, "ok");
+    await loadLibrary();
+    openLib("playlist", name);
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
+async function relocateFolder(name) {
+  try {
+    if (await invoke("playlist_relocate", { name })) {
+      toast(`Found “${name}” again`, "ok");
+      await loadLibrary();
+    }
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
+async function unlinkFolder(name) {
+  const ok = await confirmBox(`Remove “${name}” from Atmosphere?`, "The folder and every song in it stay exactly where they are on your device. Atmosphere just stops showing it as a playlist.", "Remove");
+  if (!ok) return;
+  try {
+    await invoke("playlist_unlink", { name });
+    openLib("songs", null, false);
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
+function playlistAddMenu(e) {
+  e.stopPropagation();
+  const r = e.currentTarget.getBoundingClientRect();
+  menuAt(r.left, r.bottom + 4, [
+    { label: "New playlist", run: () => newPlaylist() },
+    { label: "Add existing folder…", run: linkFolder },
+  ]);
+}
 
 async function newPlaylist(tracks = []) {
   const input = h("input", { class: "text wide", placeholder: "Playlist name", "aria-label": "Playlist name" });
@@ -608,6 +655,20 @@ function mosaic(tracks) {
 function playlistView(root, name) {
   const p = (Lib.data?.playlists || []).find((x) => x.name === name);
   if (!p) return root.append(libHead("Playlist not found", "Its folder may have been moved or deleted."));
+  if (p.missing) {
+    root.append(
+      libHead(p.name, "Linked folder"),
+      h("div", { class: "lib-empty missing-folder" },
+        icon("alert-circle"),
+        h("h2", {}, "This folder can't be found"),
+        h("p", {}, "It may have been moved or renamed, or it's on a drive that isn't connected. Atmosphere checks again every few seconds and brings it back as soon as it's there."),
+        h("code", { class: "path" }, p.path),
+        h("div", { class: "row center" },
+          h("button", { class: "btn primary", onclick: () => relocateFolder(p.name) }, icon("folder-open"), "Locate folder…"),
+          h("button", { class: "btn ghost", onclick: () => unlinkFolder(p.name) }, "Remove from Atmosphere")))
+    );
+    return;
+  }
   const tracks = p.order.map((id) => Lib.byId.get(id)).filter(Boolean);
   const dur = tracks.reduce((n, t) => n + (t.durationMs || 0), 0);
   const title = h("h1", { class: "hero-title editable", contenteditable: "plaintext-only", spellcheck: "false", "aria-label": "Playlist name", onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.blur(); } } }, p.name);
@@ -627,17 +688,19 @@ function playlistView(root, name) {
       h("div", { class: "hero-bg", style: tracks[0]?.art ? `background-image:url("${artUrl(tracks[0].art)}")` : "" }),
       mosaic(tracks),
       h("div", { class: "hero-meta" },
-        h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, icon("folder"), "Playlist folder")),
+        h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, icon(p.linked ? "link" : "folder"), p.linked ? "Your folder" : "Playlist folder")),
         title,
         h("p", { class: "view-sub" }, `${plural(tracks.length, "song")}${dur ? " · " + fmtLong(dur) : ""}`),
         h("button", { class: "link path", title: "Open this folder", onclick: () => invoke("reveal", { path: p.path }) }, p.path),
         h("div", { class: "row" }, ...playBtns(tracks),
           h("button", { class: "btn ghost", onclick: async () => { try { const n = await invoke("playlist_add_files", { name: p.name }); if (n) toast(`Added ${plural(n, "song")}`, "ok"); } catch (e) { toast(errText(e), "err"); } } }, icon("plus"), "Add files…"),
-          h("button", { class: "btn ghost danger", onclick: async () => { if (await confirmBox(`Delete “${p.name}”?`, "The playlist folder goes to your Recycle Bin or Trash. Songs in your library aren't touched.", "Delete")) { await invoke("playlist_delete", { name: p.name }).catch((e) => toast(errText(e), "err")); openLib("songs", null, false); } } }, icon("trash"), "Delete"))))
+          p.linked
+            ? h("button", { class: "btn ghost", onclick: () => unlinkFolder(p.name) }, icon("x"), "Remove from Atmosphere")
+            : h("button", { class: "btn ghost danger", onclick: async () => { if (await confirmBox(`Delete “${p.name}”?`, "The playlist folder goes to your Recycle Bin or Trash. Songs in your library aren't touched.", "Delete")) { await invoke("playlist_delete", { name: p.name }).catch((e) => toast(errText(e), "err")); openLib("songs", null, false); } } }, icon("trash"), "Delete"))))
   );
   if (Lib.back.length) root.firstChild.prepend(h("button", { class: "icon-btn back on-hero", "aria-label": "Back", onclick: libBack }, icon("arrow-left")));
   if (!tracks.length) return root.append(h("div", { class: "lib-empty slim" }, h("p", {}, "Drag songs onto this playlist in the sidebar, use “Add to playlist” from any song's menu, or add files from your computer.")));
-  root.append(h("div", { class: "pad-x" }, h("p", { class: "muted small hint-line" }, "Drag rows to reorder. The order is saved in the folder's playlist.m3u8, so other players see it too."), trackList(tracks, { cover: true, playlist: p.name })));
+  root.append(h("div", { class: "pad-x" }, h("p", { class: "muted small hint-line" }, p.linked ? "This is your own folder; songs in subfolders are included. Drag rows to reorder, saved in a playlist.m3u8 inside it." : "Drag rows to reorder. The order is saved in the folder's playlist.m3u8, so other players see it too."), trackList(tracks, { cover: true, playlist: p.name })));
 }
 
 function likedView(root) {
@@ -755,7 +818,7 @@ async function cleanStorage(ids) {
 /* boot */
 function bindLibrary() {
   $$("[data-lib]").forEach((b) => b.addEventListener("click", () => { Lib.back = []; openLib(b.dataset.lib, null, false); }));
-  $("#newPlaylistBtn").addEventListener("click", () => newPlaylist());
+  $("#newPlaylistBtn").addEventListener("click", playlistAddMenu);
   $("#libScroll").addEventListener("scroll", () => Lib.drawSongs && requestAnimationFrame(Lib.drawSongs), { passive: true });
   window.addEventListener("resize", () => Lib.drawSongs && Lib.drawSongs());
   window.addEventListener("player", (e) => { if (e.detail.type === "track") markPlaying(); });
@@ -844,6 +907,26 @@ function playlistMenu(e, name) {
   const p = (Lib.data?.playlists || []).find((x) => x.name === name);
   if (!p) return;
   const tracks = p.order.map((id) => Lib.byId.get(id)).filter(Boolean);
+  if (p.missing) {
+    return menuAt(e.clientX, e.clientY, [
+      { label: "Locate folder…", run: () => relocateFolder(name) },
+      "-",
+      { label: "Remove from Atmosphere…", run: () => unlinkFolder(name) },
+    ]);
+  }
+  if (p.linked) {
+    return menuAt(e.clientX, e.clientY, [
+      { label: "Play", disabled: !tracks.length, run: () => playList(tracks, 0, false) },
+      { label: "Shuffle", disabled: !tracks.length, run: () => playList(tracks, Math.floor(Math.random() * tracks.length), true) },
+      "-",
+      { label: "Add files…", run: () => invoke("playlist_add_files", { name }).catch((err) => toast(errText(err), "err")) },
+      { label: "Rename in Atmosphere…", run: () => renamePlaylist(name) },
+      { label: "Show in folder", run: () => invoke("reveal", { path: p.path }) },
+      { label: "Locate a different folder…", run: () => relocateFolder(name) },
+      "-",
+      { label: "Remove from Atmosphere…", run: () => unlinkFolder(name) },
+    ]);
+  }
   menuAt(e.clientX, e.clientY, [
     { label: "Play", disabled: !tracks.length, run: () => playList(tracks, 0, false) },
     { label: "Shuffle", disabled: !tracks.length, run: () => playList(tracks, Math.floor(Math.random() * tracks.length), true) },

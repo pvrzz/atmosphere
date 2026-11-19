@@ -85,7 +85,8 @@ pub fn start_watch(app: AppHandle) {
     let (roots, pl) = dirs(&app.state::<AppState>());
     let _ = std::fs::create_dir_all(&pl);
     let mut watched: Vec<PathBuf> = Vec::new();
-    for r in roots.into_iter().chain(std::iter::once(pl)) {
+    let linked: Vec<PathBuf> = app.state::<AppState>().library.linked_list().into_iter().map(|l| PathBuf::from(l.path)).collect();
+    for r in roots.into_iter().chain(std::iter::once(pl)).chain(linked) {
         if r.is_dir() && !watched.iter().any(|w| r.starts_with(w)) && watcher.watch(&r, RecursiveMode::Recursive).is_ok() {
             watched.push(r);
         }
@@ -107,6 +108,77 @@ pub fn start_watch(app: AppHandle) {
             }
         }
     });
+}
+
+pub fn start_linked_monitor(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut seen: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        loop {
+            let state = app.state::<AppState>();
+            let (_, pl) = dirs(&state);
+            let mut changed_any = false;
+            let mut rewatch = false;
+            for l in state.library.linked_list() {
+                let here = Path::new(&l.path).is_dir();
+                let before = seen.insert(l.path.clone(), here);
+                if before == Some(here) || before.is_none() {
+                    continue;
+                }
+                changed_any = true;
+                if here {
+                    state.library.scan_folder(Path::new(&l.path), &pl);
+                    rewatch = true;
+                } else {
+                    state.library.remove_under(Path::new(&l.path));
+                }
+            }
+            if rewatch {
+                start_watch(app.clone());
+            }
+            if changed_any {
+                changed(&app);
+            }
+            std::thread::sleep(Duration::from_secs(10));
+        }
+    });
+}
+
+async fn pick_folder(app: &AppHandle, title: &str) -> CmdResult<Option<PathBuf>> {
+    let a = app.clone();
+    let title = title.to_string();
+    let picked = tauri::async_runtime::spawn_blocking(move || a.dialog().file().set_title(&title).blocking_pick_folder()).await.map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()))
+}
+
+#[tauri::command]
+pub async fn playlist_link(app: AppHandle, state: State<'_, AppState>) -> CmdResult<Option<String>> {
+    let Some(path) = pick_folder(&app, "Add an existing folder as a playlist").await? else { return Ok(None) };
+    let (_, pl) = dirs(&state);
+    let lib = state.library.clone();
+    let name = tauri::async_runtime::spawn_blocking(move || lib.playlist_link(&pl, &path)).await.map_err(|e| e.to_string())?.map_err(err)?;
+    start_watch(app.clone());
+    changed(&app);
+    Ok(Some(name))
+}
+
+#[tauri::command]
+pub async fn playlist_relocate(app: AppHandle, state: State<'_, AppState>, name: String) -> CmdResult<bool> {
+    let Some(path) = pick_folder(&app, &format!("Locate the folder for “{name}”")).await? else { return Ok(false) };
+    let (_, pl) = dirs(&state);
+    let lib = state.library.clone();
+    tauri::async_runtime::spawn_blocking(move || lib.playlist_relocate(&pl, &name, &path)).await.map_err(|e| e.to_string())?.map_err(err)?;
+    start_watch(app.clone());
+    changed(&app);
+    Ok(true)
+}
+
+#[tauri::command]
+pub fn playlist_unlink(app: AppHandle, state: State<'_, AppState>, name: String) -> CmdResult<()> {
+    let (roots, _) = dirs(&state);
+    state.library.playlist_unlink(&name, &roots).map_err(err)?;
+    start_watch(app.clone());
+    changed(&app);
+    Ok(())
 }
 
 #[tauri::command]

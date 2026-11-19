@@ -17,10 +17,12 @@ strip = true
 panic = "abort"
 
 [dependencies]
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
 anyhow = "1.0.104"
 base64 = "0.23.1"
 bytes = "1.12.2"
 dirs = "7.0.0"
+getrandom = "0.3"
 futures-util = "0.3.34"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.25.5"

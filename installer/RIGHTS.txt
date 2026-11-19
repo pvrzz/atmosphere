@@ -16,4 +16,4 @@ Atmosphere downloads two open-source tools on first run, both from their officia
 - yt-dlp (Unlicense): https://github.com/yt-dlp/yt-dlp
 - ffmpeg (GPL builds): https://github.com/yt-dlp/FFmpeg-Builds
 
-You'll be asked to confirm these points again the first time you open the app.
+Clicking "I Agree" confirms these points, so Atmosphere won't ask again when you first open it.

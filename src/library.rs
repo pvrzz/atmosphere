@@ -78,6 +78,14 @@ pub struct Playlist {
     pub name: String,
     pub path: String,
     pub order: Vec<String>,
+    pub linked: bool,
+    pub missing: bool,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Linked {
+    pub name: String,
+    pub path: String,
 }
 
 #[derive(Serialize)]
@@ -98,6 +106,7 @@ pub struct Library {
     stats: RwLock<Stats>,
     artists: RwLock<HashMap<String, ArtistMeta>>,
     hidden: RwLock<HashSet<String>>,
+    linked: RwLock<Vec<Linked>>,
     scanning: AtomicBool,
 }
 
@@ -234,6 +243,7 @@ impl Library {
             stats: RwLock::new(load("stats.json")),
             artists: RwLock::new(load("artists.json")),
             hidden: RwLock::new(load("hidden.json")),
+            linked: RwLock::new(load("linked.json")),
             scanning: AtomicBool::new(false),
         }
     }
@@ -269,6 +279,7 @@ impl Library {
             let mut seen = HashSet::new();
             let mut all_roots: Vec<PathBuf> = roots.to_vec();
             all_roots.push(playlists_dir.to_path_buf());
+            all_roots.extend(self.linked_folders().into_iter().map(|(_, p)| p));
             for root in all_roots.iter().filter(|r| r.is_dir()) {
                 for entry in walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.')).flatten() {
                     let p = entry.path();
@@ -282,7 +293,7 @@ impl Library {
             let total = files.len();
             let mut next: HashMap<String, Track> = HashMap::with_capacity(total);
             for (i, p) in files.iter().enumerate() {
-                let playlist = playlist_of(p, playlists_dir);
+                let playlist = self.playlist_for(p, playlists_dir);
                 let key = p.to_string_lossy().into_owned();
                 let reuse = old.get(&key).filter(|t| file_stamp(p) == Some((t.size, t.mtime))).cloned();
                 let track = match reuse {
@@ -310,7 +321,7 @@ impl Library {
         if self.hidden.read().unwrap().contains(&*path.to_string_lossy()) {
             bail!("hidden");
         }
-        let t = read_track(path, playlist_of(path, playlists_dir))?;
+        let t = read_track(path, self.playlist_for(path, playlists_dir))?;
         self.tracks.write().unwrap().insert(t.id.clone(), t.clone());
         self.persist();
         Ok(t)
@@ -332,19 +343,24 @@ impl Library {
     }
 
     fn playlists(&self, dir: &Path, tracks: &[Track]) -> Vec<Playlist> {
-        let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
-        let mut out = Vec::new();
-        for entry in rd.flatten().filter(|e| e.path().is_dir()) {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if name.starts_with('.') {
-                continue;
+        let mut folders: Vec<(String, PathBuf, bool)> = Vec::new();
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for entry in rd.flatten().filter(|e| e.path().is_dir()) {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !name.starts_with('.') {
+                    folders.push((name, entry.path(), false));
+                }
             }
-            let folder = entry.path();
+        }
+        folders.extend(self.linked_folders().into_iter().map(|(n, p)| (n, p, true)));
+        let mut out = Vec::new();
+        for (name, folder, linked) in folders {
             let mut members: Vec<&Track> = tracks.iter().filter(|t| t.playlist.as_deref() == Some(name.as_str())).collect();
             let order = read_order(&folder);
-            let file_name = |t: &Track| Path::new(&t.path).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-            members.sort_by_key(|t| (order.iter().position(|o| *o == file_name(t)).unwrap_or(usize::MAX), file_name(t).to_lowercase()));
-            out.push(Playlist { name, path: folder.to_string_lossy().into_owned(), order: members.iter().map(|t| t.id.clone()).collect() });
+            let rel = |t: &Track| Path::new(&t.path).strip_prefix(&folder).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+            members.sort_by_key(|t| (order.iter().position(|o| *o == rel(t)).unwrap_or(usize::MAX), rel(t).to_lowercase()));
+            let missing = linked && !folder.is_dir();
+            out.push(Playlist { name, path: folder.to_string_lossy().into_owned(), order: members.iter().map(|t| t.id.clone()).collect(), linked, missing });
         }
         out.sort_by_key(|p| p.name.to_lowercase());
         out
@@ -353,7 +369,7 @@ impl Library {
     pub fn playlist_create(&self, dir: &Path, name: &str) -> Result<String> {
         let clean = sanitize(name.trim());
         let folder = dir.join(&clean);
-        if folder.exists() {
+        if folder.exists() || self.linked_path(&clean).is_some() {
             bail!("A playlist called “{clean}” already exists.");
         }
         std::fs::create_dir_all(&folder).context("Couldn't create the playlist folder")?;
@@ -364,8 +380,22 @@ impl Library {
     pub fn playlist_rename(&self, dir: &Path, from: &str, to: &str) -> Result<String> {
         let clean = sanitize(to.trim());
         let (a, b) = (dir.join(from), dir.join(&clean));
-        if b.exists() {
+        if b.exists() || (clean != from && self.linked_path(&clean).is_some()) {
             bail!("A playlist called “{clean}” already exists.");
+        }
+        if self.linked_path(from).is_some() {
+            {
+                let mut linked = self.linked.write().unwrap();
+                if let Some(l) = linked.iter_mut().find(|l| l.name == from) {
+                    l.name = clean.clone();
+                }
+                store("linked.json", &*linked);
+            }
+            for t in self.tracks.write().unwrap().values_mut().filter(|t| t.playlist.as_deref() == Some(from)) {
+                t.playlist = Some(clean.clone());
+            }
+            self.persist();
+            return Ok(clean);
         }
         std::fs::rename(&a, &b).context("Couldn't rename the playlist folder")?;
         let moved: Vec<Track> = self.tracks.read().unwrap().values().filter(|t| t.playlist.as_deref() == Some(from)).cloned().collect();
@@ -385,6 +415,9 @@ impl Library {
     }
 
     pub fn playlist_delete(&self, dir: &Path, name: &str) -> Result<()> {
+        if self.linked_path(name).is_some() {
+            bail!("Linked folders are never deleted by Atmosphere. Remove it from Atmosphere instead.");
+        }
         trash::delete(dir.join(name)).map_err(|e| anyhow!("Couldn't move the playlist to the trash ({e})"))?;
         self.tracks.write().unwrap().retain(|_, t| t.playlist.as_deref() != Some(name));
         self.persist();
@@ -392,7 +425,10 @@ impl Library {
     }
 
     pub fn playlist_add(&self, dir: &Path, name: &str, sources: &[PathBuf], link: bool) -> Result<usize> {
-        let folder = dir.join(name);
+        let folder = self.folder(dir, name);
+        if self.linked_path(name).is_some() && !folder.is_dir() {
+            bail!("“{name}” can't be found. Locate its folder first.");
+        }
         std::fs::create_dir_all(&folder)?;
         let mut order = read_order(&folder);
         let mut added = 0;
@@ -423,7 +459,7 @@ impl Library {
     }
 
     pub fn playlist_remove(&self, dir: &Path, name: &str, ids: &[String]) -> Result<()> {
-        let folder = dir.join(name);
+        let folder = self.folder(dir, name);
         let mut order = read_order(&folder);
         for id in ids {
             let Some(t) = self.track(id).filter(|t| t.playlist.as_deref() == Some(name)) else { continue };
@@ -433,7 +469,7 @@ impl Library {
             if lrc.exists() {
                 let _ = trash::delete(&lrc);
             }
-            let fname = p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+            let fname = p.strip_prefix(&folder).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
             order.retain(|o| *o != fname);
             self.tracks.write().unwrap().remove(id);
         }
@@ -443,12 +479,142 @@ impl Library {
     }
 
     pub fn playlist_reorder(&self, dir: &Path, name: &str, ids: &[String]) -> Result<()> {
+        let folder = self.folder(dir, name);
         let names: Vec<String> = ids
             .iter()
             .filter_map(|id| self.track(id))
-            .filter_map(|t| Path::new(&t.path).file_name().map(|f| f.to_string_lossy().into_owned()))
+            .filter_map(|t| Path::new(&t.path).strip_prefix(&folder).ok().map(|r| r.to_string_lossy().replace('\\', "/")))
             .collect();
-        write_order(&dir.join(name), &names)
+        write_order(&folder, &names)
+    }
+
+    fn linked_folders(&self) -> Vec<(String, PathBuf)> {
+        self.linked.read().unwrap().iter().map(|l| (l.name.clone(), PathBuf::from(&l.path))).collect()
+    }
+
+    pub fn linked_list(&self) -> Vec<Linked> {
+        self.linked.read().unwrap().clone()
+    }
+
+    fn linked_path(&self, name: &str) -> Option<PathBuf> {
+        self.linked.read().unwrap().iter().find(|l| l.name == name).map(|l| PathBuf::from(&l.path))
+    }
+
+    fn folder(&self, dir: &Path, name: &str) -> PathBuf {
+        self.linked_path(name).unwrap_or_else(|| dir.join(name))
+    }
+
+    fn playlist_for(&self, path: &Path, playlists_dir: &Path) -> Option<String> {
+        self.linked
+            .read()
+            .unwrap()
+            .iter()
+            .filter(|l| path.starts_with(&l.path))
+            .max_by_key(|l| l.path.len())
+            .map(|l| l.name.clone())
+            .or_else(|| playlist_of(path, playlists_dir))
+    }
+
+    fn unique_name(&self, dir: &Path, base: &str) -> String {
+        let taken = |n: &str| dir.join(n).exists() || self.linked_path(n).is_some();
+        let base = sanitize(base.trim());
+        let base = if base.is_empty() { "Folder".to_string() } else { base };
+        if !taken(&base) {
+            return base;
+        }
+        (2..).map(|i| format!("{base} ({i})")).find(|n| !taken(n)).unwrap_or(base)
+    }
+
+    pub fn scan_folder(&self, folder: &Path, playlists_dir: &Path) -> usize {
+        let hidden = self.hidden.read().unwrap().clone();
+        let mut found = Vec::new();
+        for e in walkdir::WalkDir::new(folder).follow_links(false).into_iter().filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.')).flatten() {
+            let p = e.path();
+            if e.file_type().is_file() && is_audio(p) && !hidden.contains(&*p.to_string_lossy()) {
+                if let Ok(t) = read_track(p, self.playlist_for(p, playlists_dir)) {
+                    found.push(t);
+                }
+            }
+        }
+        let n = found.len();
+        let mut tracks = self.tracks.write().unwrap();
+        for t in found {
+            tracks.insert(t.id.clone(), t);
+        }
+        drop(tracks);
+        self.persist();
+        n
+    }
+
+    pub fn playlist_link(&self, dir: &Path, path: &Path) -> Result<String> {
+        if !path.is_dir() {
+            bail!("That folder can't be found.");
+        }
+        if path.parent().is_none() {
+            bail!("Choose a folder rather than a whole drive.");
+        }
+        if path.starts_with(dir) {
+            bail!("That folder is already one of your playlists.");
+        }
+        let key = path.to_string_lossy().into_owned();
+        if let Some(l) = self.linked.read().unwrap().iter().find(|l| l.path == key) {
+            return Ok(l.name.clone());
+        }
+        if self.linked.read().unwrap().iter().any(|l| path.starts_with(&l.path) || Path::new(&l.path).starts_with(path)) {
+            bail!("That folder overlaps one you've already added.");
+        }
+        let base = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = self.unique_name(dir, &base);
+        {
+            let mut linked = self.linked.write().unwrap();
+            linked.push(Linked { name: name.clone(), path: key });
+            store("linked.json", &*linked);
+        }
+        self.scan_folder(path, dir);
+        Ok(name)
+    }
+
+    pub fn playlist_relocate(&self, dir: &Path, name: &str, path: &Path) -> Result<()> {
+        if !path.is_dir() {
+            bail!("That folder can't be found.");
+        }
+        if path.starts_with(dir) {
+            bail!("That folder is already one of your playlists.");
+        }
+        let key = path.to_string_lossy().into_owned();
+        if self.linked.read().unwrap().iter().any(|l| l.name != name && (path.starts_with(&l.path) || Path::new(&l.path).starts_with(path))) {
+            bail!("That folder overlaps one you've already added.");
+        }
+        let old = {
+            let mut linked = self.linked.write().unwrap();
+            let Some(l) = linked.iter_mut().find(|l| l.name == name) else { bail!("That playlist isn't a linked folder.") };
+            let old = std::mem::replace(&mut l.path, key);
+            store("linked.json", &*linked);
+            old
+        };
+        self.tracks.write().unwrap().retain(|_, t| !(t.playlist.as_deref() == Some(name) && Path::new(&t.path).starts_with(&old)));
+        self.scan_folder(path, dir);
+        Ok(())
+    }
+
+    pub fn playlist_unlink(&self, name: &str, library_roots: &[PathBuf]) -> Result<()> {
+        {
+            let mut linked = self.linked.write().unwrap();
+            let before = linked.len();
+            linked.retain(|l| l.name != name);
+            if linked.len() == before {
+                bail!("That playlist isn't a linked folder.");
+            }
+            store("linked.json", &*linked);
+        }
+        let mut tracks = self.tracks.write().unwrap();
+        tracks.retain(|_, t| t.playlist.as_deref() != Some(name) || library_roots.iter().any(|r| Path::new(&t.path).starts_with(r)));
+        for t in tracks.values_mut().filter(|t| t.playlist.as_deref() == Some(name)) {
+            t.playlist = None;
+        }
+        drop(tracks);
+        self.persist();
+        Ok(())
     }
 
     pub fn remove_under(&self, path: &Path) -> usize {
@@ -526,8 +692,8 @@ impl Library {
                 let _ = trash::delete(&lrc);
             }
             if let Some(name) = &t.playlist {
-                let folder = playlists_dir.join(name);
-                let fname = p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+                let folder = self.folder(playlists_dir, name);
+                let fname = p.strip_prefix(&folder).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
                 let mut order = read_order(&folder);
                 order.retain(|o| *o != fname);
                 let _ = write_order(&folder, &order);
@@ -687,6 +853,44 @@ mod tests {
         assert_eq!(lib.scan(std::slice::from_ref(&music), &lists, |_, _| {}).unwrap(), 3);
         assert_eq!(lib.remove_under(&music.join("Album A")), 2);
         assert_eq!(lib.snapshot(&lists).tracks.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn linked_folders_link_go_missing_relocate_and_unlink() {
+        let root = std::env::temp_dir().join(format!("atmo-link-{}-{}", std::process::id(), now()));
+        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let lists = root.join("Playlists");
+        std::fs::create_dir_all(lists.join("Gym")).unwrap();
+        let mine = root.join("Elsewhere").join("Gym");
+        wav(&mine.join("a.wav"), 2);
+        wav(&mine.join("Sub").join("b.wav"), 3);
+        let lib = Library::load();
+        let name = lib.playlist_link(&lists, &mine).unwrap();
+        assert_eq!(name, "Gym (2)");
+        assert_eq!(lib.playlist_link(&lists, &mine).unwrap(), name);
+        assert!(lib.playlist_link(&lists, &mine.join("Sub")).is_err());
+        assert!(lib.playlist_link(&lists, &lists.join("Gym")).is_err());
+        let snap = lib.snapshot(&lists);
+        let p = snap.playlists.iter().find(|p| p.name == name).unwrap();
+        assert!(p.linked && !p.missing);
+        assert_eq!(p.order.len(), 2);
+        assert!(lib.playlist_delete(&lists, &name).is_err());
+        assert!(mine.exists());
+        let moved = root.join("Moved");
+        std::fs::rename(&mine, &moved).unwrap();
+        lib.remove_under(&mine);
+        let p = lib.snapshot(&lists).playlists.into_iter().find(|p| p.name == name).unwrap();
+        assert!(p.missing && p.order.is_empty());
+        lib.playlist_relocate(&lists, &name, &moved).unwrap();
+        let p = lib.snapshot(&lists).playlists.into_iter().find(|p| p.name == name).unwrap();
+        assert!(!p.missing && p.order.len() == 2);
+        let renamed = lib.playlist_rename(&lists, &name, "Lifting").unwrap();
+        assert!(moved.exists() && lib.snapshot(&lists).playlists.iter().any(|p| p.name == renamed && p.order.len() == 2));
+        lib.playlist_unlink(&renamed, &[]).unwrap();
+        let snap = lib.snapshot(&lists);
+        assert!(snap.playlists.iter().all(|p| !p.linked) && snap.tracks.is_empty());
+        assert!(moved.join("a.wav").exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -60,6 +60,11 @@ pub struct Settings {
     pub embed_chapters: bool,
     pub cookies_browser: String,
     pub cookies_file: String,
+    pub api_enabled: bool,
+    pub api_port: u16,
+    pub api_read: bool,
+    pub api_control: bool,
+    pub api_links: bool,
     pub proxy: String,
     pub rate_limit: String,
     pub ytdlp_path: String,
@@ -100,6 +105,11 @@ impl Default for Settings {
             embed_chapters: true,
             cookies_browser: String::new(),
             cookies_file: String::new(),
+            api_enabled: false,
+            api_port: 47823,
+            api_read: true,
+            api_control: true,
+            api_links: false,
             proxy: String::new(),
             rate_limit: String::new(),
             ytdlp_path: String::new(),
@@ -138,6 +148,11 @@ pub struct SettingsPatch {
     pub embed_chapters: Option<bool>,
     pub cookies_browser: Option<String>,
     pub cookies_file: Option<String>,
+    pub api_enabled: Option<bool>,
+    pub api_port: Option<u16>,
+    pub api_read: Option<bool>,
+    pub api_control: Option<bool>,
+    pub api_links: Option<bool>,
     pub proxy: Option<String>,
     pub rate_limit: Option<String>,
     pub ytdlp_path: Option<String>,
@@ -155,6 +170,18 @@ pub struct SettingsPatch {
 }
 
 impl Settings {
+    pub fn accept_from_installer(&mut self) -> bool {
+        if self.rights_ok() || !cfg!(windows) {
+            return false;
+        }
+        let marker = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("rights-accepted")));
+        let ok = marker.and_then(|m| std::fs::read_to_string(m).ok()).is_some_and(|t| t.trim() == format!("terms={TERMS_VERSION}"));
+        if ok {
+            self.accept_rights();
+        }
+        ok
+    }
+
     pub fn rights_ok(&self) -> bool {
         self.rights_version == TERMS_VERSION
     }
@@ -174,6 +201,10 @@ impl Settings {
             ($($f:ident),*) => { $( if let Some(v) = p.$f { self.$f = v; } )* };
         }
         set!(save_as, embed_metadata, collection_folders, number_tracks, skip_downloaded, sponsorblock, embed_subtitles, embed_chapters, watch_clipboard);
+        set!(api_enabled, api_read, api_control, api_links);
+        if let Some(p) = p.api_port.filter(|p| *p >= 1024) {
+            self.api_port = p;
+        }
         set!(cookies_browser, cookies_file, proxy, rate_limit, ytdlp_path, ffmpeg_path, subtitle_langs, musixmatch_key, playlist_copy, lyrics_on_download, custom_lyrics, fx_presets);
         if let Some(v) = p.library_folders {
             let mut seen = std::collections::HashSet::new();
@@ -263,5 +294,14 @@ mod tests {
         assert_eq!(s.concurrency, 8);
         assert_eq!(s.theme, "system");
         assert_eq!(s.mp3_bitrate, 192);
+    }
+}
+
+#[cfg(test)]
+mod terms_tests {
+    #[test]
+    fn installer_records_the_current_terms_version() {
+        let hooks = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/installer/hooks.nsh")).unwrap();
+        assert!(hooks.contains(&format!("!define ATMO_TERMS_VERSION {}", super::TERMS_VERSION)), "bump ATMO_TERMS_VERSION in installer/hooks.nsh along with TERMS_VERSION");
     }
 }

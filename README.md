@@ -54,6 +54,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - **Songs, Albums, Artists, Liked.** The song list is virtualized, so big libraries scroll smoothly. Search and sort everywhere.
 - **Artist profiles** with popular tracks, albums, singles & EPs, appears-on, and a photo and bio you can attach.
 - **Playlists are real folders** on your drive, so phones, USB drives and other players can use them as-is. Songs are hard-linked (no extra space) or copied, and a `playlist.m3u8` keeps the order.
+- **Use folders you already have** as playlists. Atmosphere never moves or deletes them. If one goes missing (renamed, moved, or on an unplugged drive), it's marked as missing with **Locate folder**, and it comes back by itself when the drive reconnects.
 - **Multi-select** with Ctrl/Shift-click. Drag songs onto playlists, play next, add to queue, edit tags, **remove from library** (the file stays) or **delete from device** (sent to the Recycle Bin or Trash).
 
 ### Player
@@ -101,6 +102,11 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - Downloads run in **track order**, with progress, retry, history, and skipping of anything downloaded before.
 - Extras: chapters, subtitles, SponsorBlock, a speed limit, a proxy, and sign-in for your own private uploads, either from your browser or from a `cookies.txt` file. **Check** confirms it works and explains what to do if it doesn't. For example, Chromium browsers lock their sign-in while they're open.
 
+### Connections
+- An optional **local API** lets other apps on your computer, like stream overlays, status tools or your own scripts, see what's playing, browse your library, control playback and send links to Get.
+- It's off until you turn it on, listens on `127.0.0.1` only, and needs a token that's shown once and stored only as a fingerprint.
+- You choose what apps may do, and browser pages are refused. See the [API guide](docs/api.md).
+
 ### Stats
 - Week, month, year or all time: listening time, plays, songs, artists, time in the app, a by-day chart, and top songs, artists and albums.
 - Songs you delete are removed from your history.
@@ -131,7 +137,7 @@ Grab a build from the [Actions](../../actions) tab, under the latest run's artif
 | Linux | `.deb`, `.rpm`, `.AppImage` |
 
 On first launch:
-1. Confirm the three rights statements.
+1. Confirm the three rights statements. The Windows installer covers this on its licence page.
 2. Let Atmosphere set up its engine: [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org), downloaded from their official releases and checksum-verified. On macOS, install ffmpeg with `brew install ffmpeg`.
 3. Add your music folders in **Settings → Library**, or paste a link.
 
@@ -178,7 +184,7 @@ On macOS, use `⌘` in place of `Ctrl`.
 
 Atmosphere is for media you own or are allowed to keep.
 
-- **Before first use**, you confirm three statements about rights and responsibility. **Each download** also asks for confirmation. The app's backend enforces both, not only the UI.
+- **Before first use**, you agree to three statements about rights and responsibility. On Windows, that's the installer's licence page. The portable app, macOS and Linux ask once inside the app. **Each download** also asks for confirmation. The app's backend enforces both, not only the UI.
 - It **never bypasses DRM or paywalls**, and skips preview-only media, the same way yt-dlp itself refuses encrypted formats.
 - **Artists recovering their own uploads** can enable downloads on the track and choose **Original file** to get the uploaded master.
 
@@ -195,6 +201,7 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/storage.rs` | Temp-file cleanup and the Storage report |
 | `src/direct.rs` | Checks and reads direct audio and video file links |
 | `src/backup.rs` | Backup and restore of settings, stats and liked songs |
+| `src/api.rs` | The opt-in local API for other apps ([guide](docs/api.md)) |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
 | `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |

@@ -1,6 +1,7 @@
 // atmosphere · main.rs · App entry point: shared state, the rights gate and every command the UI can call.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod api;
 mod backup;
 mod direct;
 mod downloader;
@@ -97,13 +98,33 @@ fn revoke_rights(state: State<'_, AppState>) -> CmdResult<SettingsView> {
 }
 
 #[tauri::command]
-fn save_settings(state: State<'_, AppState>, patch: SettingsPatch) -> CmdResult<SettingsView> {
-    let before = state.snapshot().concurrency;
+fn save_settings(app: AppHandle, state: State<'_, AppState>, patch: SettingsPatch) -> CmdResult<SettingsView> {
+    let before = state.snapshot();
     let after = state.update(|s| s.apply(patch))?;
-    if after.concurrency != before {
+    if after.concurrency != before.concurrency {
         state.dl.set_concurrency(after.concurrency);
     }
+    if (after.api_enabled, after.api_port) != (before.api_enabled, before.api_port) {
+        api::apply(&app);
+    }
     Ok(view(after))
+}
+
+#[tauri::command]
+fn api_status(hub: State<'_, api::ApiHub>) -> api::Status {
+    hub.status()
+}
+
+#[tauri::command]
+fn api_new_token(app: AppHandle, hub: State<'_, api::ApiHub>) -> CmdResult<String> {
+    let token = hub.new_token().map_err(err)?;
+    api::apply(&app);
+    Ok(token)
+}
+
+#[tauri::command]
+fn api_publish(hub: State<'_, api::ApiHub>, state: serde_json::Value) {
+    hub.publish(state);
 }
 
 #[tauri::command]
@@ -407,7 +428,11 @@ fn main() {
         };
         std::process::exit(code);
     }
-    let settings = Arc::new(Mutex::new(settings::load()));
+    let mut loaded = settings::load();
+    if loaded.accept_from_installer() {
+        let _ = settings::save(&loaded);
+    }
+    let settings = Arc::new(Mutex::new(loaded));
     let http = reqwest::Client::builder()
         .user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
@@ -429,12 +454,18 @@ fn main() {
             let library = Arc::new(library::Library::load());
             let dl = Arc::new(Downloader::new(app.handle().clone(), settings.clone(), history.clone(), library.clone(), http.clone()));
             app.manage(AppState { settings: settings.clone(), http: http.clone(), prober: Arc::new(Prober::default()), dl, history, library, startup_cleanup: Mutex::new(Some(cleaned)) });
+            app.manage(api::ApiHub::load());
+            api::apply(app.handle());
             libcmd::spawn_scan(app.handle().clone());
+            libcmd::start_linked_monitor(app.handle().clone());
             libcmd::start_watch(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             signin_check,
+            api_status,
+            api_new_token,
+            api_publish,
             frame_color,
             backup_save,
             backup_pick,
@@ -494,7 +525,10 @@ fn main() {
             libcmd::lyrics_get,
             libcmd::lyrics_save,
             libcmd::lyrics_save_text,
-            libcmd::set_fullscreen
+            libcmd::set_fullscreen,
+            libcmd::playlist_link,
+            libcmd::playlist_relocate,
+            libcmd::playlist_unlink
         ])
         .build(tauri::generate_context!())
         .expect("error while building atmosphere")

@@ -1,4 +1,16 @@
-; atmosphere · hooks.nsh · Uninstaller hooks: offer a backup before removing data, and remove Atmosphere's own data folders only when asked
+; atmosphere · hooks.nsh · Installer hooks: record the rights agreement, offer a backup before removing data, and remove Atmosphere's own data only when asked
+
+!define ATMO_TERMS_VERSION 1
+
+!macro NSIS_HOOK_POSTINSTALL
+  ${If} $PassiveMode <> 1
+  ${AndIf} $UpdateMode <> 1
+  ${AndIfNot} ${Silent}
+    FileOpen $R9 "$INSTDIR\rights-accepted" w
+    FileWrite $R9 "terms=${ATMO_TERMS_VERSION}"
+    FileClose $R9
+  ${EndIf}
+!macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
   ${If} $UpdateMode <> 1
@@ -26,6 +38,10 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+    Delete "$INSTDIR\rights-accepted"
+    RMDir "$INSTDIR"
+  ${EndIf}
   ${If} $UpdateMode <> 1
   ${AndIf} $DeleteAppDataCheckboxState = 1
     SetShellVarContext current

@@ -44,10 +44,10 @@
       <div class="nav-group grow">
         <div class="nav-heading-row">
           <h2 class="nav-heading">Playlists</h2>
-          <button class="icon-btn" id="newPlaylistBtn" aria-label="New playlist" title="New playlist"><span class="i" data-icon="plus"></span></button>
+          <button class="icon-btn" id="newPlaylistBtn" aria-label="New playlist or add a folder" title="New playlist or add a folder" aria-haspopup="menu"><span class="i" data-icon="plus"></span></button>
         </div>
         <nav class="nav playlist-nav" id="playlistNav" aria-label="Playlists"></nav>
-        <p class="fetched-empty" id="playlistEmpty">Playlists are folders on this device. Drag songs onto one to add them.</p>
+        <p class="fetched-empty" id="playlistEmpty">Playlists are folders on this device. Use + to make one or add a folder you already have.</p>
       </div>
 
       <div class="sidebar-foot">
@@ -265,6 +265,22 @@
               <label class="setting"><div><strong>Offer copied links</strong><span>When you switch to Atmosphere with a link copied, offer to fetch it.</span></div><input type="checkbox" class="switch" data-key="watchClipboard" /></label>
             </div>
 
+            <h2 id="set-api">Connections</h2>
+            <p class="set-note">Let other apps on this computer, like stream overlays, status tools or your own scripts, see what's playing and control Atmosphere. It stays off unless you turn it on.</p>
+            <div class="group">
+              <label class="setting"><div><strong>Let other apps connect</strong><span class="api-status" id="apiStatus" role="status">Off</span></div><input type="checkbox" class="switch" data-key="apiEnabled" id="apiEnabledToggle" /></label>
+              <div class="setting">
+                <div><strong>Access token</strong><span id="apiTokenNote">Apps send this token with every request. It's shown once; Atmosphere keeps only a fingerprint.</span>
+                  <div class="api-token" id="apiTokenBox" hidden><code id="apiTokenValue"></code><button class="btn small" id="apiTokenCopy" type="button">Copy</button><p class="muted small">Copy it now. It won't be shown again.</p></div>
+                </div>
+                <button class="btn" id="apiTokenBtn" type="button">Create token</button>
+              </div>
+              <label class="setting api-scope"><div><strong>See what's playing and browse the library</strong><span>Song details, artwork, playlists and live updates.</span></div><input type="checkbox" class="switch" data-key="apiRead" /></label>
+              <label class="setting api-scope"><div><strong>Control playback and the queue</strong><span>Play, pause, skip, seek, volume and queueing songs.</span></div><input type="checkbox" class="switch" data-key="apiControl" /></label>
+              <label class="setting api-scope"><div><strong>Send links to Get</strong><span>Opens the link in Atmosphere. Nothing is saved until you review and confirm it.</span></div><input type="checkbox" class="switch" data-key="apiLinks" /></label>
+              <div class="setting api-scope"><div><strong>Port</strong><span>Only reachable from this computer. <button class="link" id="apiDocs" type="button">How apps connect</button></span></div><input class="text short" id="apiPort" inputmode="numeric" spellcheck="false" aria-label="API port" /></div>
+            </div>
+
             <h2 id="set-storage">Storage</h2>
             <p class="set-note">Temporary files are removed automatically on every launch and exit. Here's everything else Atmosphere keeps.</p>
             <div class="group" id="storageList"></div>
@@ -333,7 +349,6 @@
         <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I'll only download media I <b>own</b>, that the <b>rights holder has allowed</b> me to download, or that's under a licence that permits it, such as artist-enabled downloads or Creative Commons.</span></label>
         <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I understand that downloading without permission can infringe copyright and break a site's terms, and that <b>I'm responsible</b> for how I use Atmosphere.</span></label>
         <label class="pledge"><input type="checkbox" class="pledge-check" /><span>I won't share downloaded media unless its licence or the rights holder allows it.</span></label>
-        <p class="fine">Atmosphere never bypasses DRM or paywalls, and skips preview-only media.</p>
         <button class="btn primary big wide" id="obAccept" disabled>Agree and continue</button>
       </section>
 
@@ -359,5 +374,6 @@
   <script src="lyrics.js"></script>
   <script src="stats.js"></script>
   <script src="miniplayer.js"></script>
+  <script src="connect.js"></script>
 </body>
 </html>

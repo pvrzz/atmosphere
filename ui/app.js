@@ -156,6 +156,7 @@ async function init() {
   bindLyrics();
   bindBackup();
   bindMini();
+  bindConnect();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));
@@ -1384,9 +1385,10 @@ function renderSettings() {
   $("#concValue").textContent = String(s.concurrency);
   $$("[data-seg=theme] button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.value === s.theme)));
   const at = s.rightsAcceptedAt ? new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(new Date(s.rightsAcceptedAt * 1000)) : "";
-  $("#rightsInfo").textContent = at ? `You confirmed it on ${at}. Withdrawing it cancels downloads and asks again.` : "Not confirmed yet.";
+  $("#rightsInfo").textContent = at ? `You agreed on ${at}. Withdrawing it cancels downloads and asks again in the app.` : "Not confirmed yet.";
   renderTemplatePreview();
   renderSignin();
+  if (typeof renderApiSettings === "function") renderApiSettings();
   renderToolSettings();
   renderLibrarySettings();
   renderLyricsSettings();
