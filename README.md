@@ -50,15 +50,30 @@ It's built for media you **own or have the rights to keep**, such as your own up
 ## Features
 
 ### Library
+- **Home** greets you with what you played recently, what's new, what's on repeat and your playlists.
+- **Search everything** with `Ctrl K`: songs, albums, artists and playlists, ranked by what you play most. Paste a link there to get it.
 - **Your folders:** the download folder plus any music folders you add. Scans are incremental, and a **live file watcher** picks up added, moved or deleted files within about a second.
 - **Songs, Albums, Artists, Liked.** The song list is virtualized, so big libraries scroll smoothly. Search and sort everywhere.
-- **Artist profiles** with popular tracks, albums, singles & EPs, appears-on, and a photo and bio you can attach.
+- **Artist profiles** with popular tracks, albums, singles & EPs, and **Featured on**, which shows the release type and which song features them. Photos, bios and logos are found automatically from Deezer, Wikipedia and Wikidata (keyless, can be turned off). Not the right artist? Search online and pick, or use your own images.
+- **Edit everything:**
+  - songs, several songs at once, and whole albums, including one cover for every track
+  - playlists: name and cover, saved as `cover.jpg` so other players show it too
+
+  Edits are written into the files' tags.
 - **Playlists are real folders** on your drive, so phones, USB drives and other players can use them as-is. Songs are hard-linked (no extra space) or copied, and a `playlist.m3u8` keeps the order.
 - **Use folders you already have** as playlists. Atmosphere never moves or deletes them. If one goes missing (renamed, moved, or on an unplugged drive), it's marked as missing with **Locate folder**, and it comes back by itself when the drive reconnects.
+- **Open with Atmosphere:** double-click an audio file to play it, or drop files on the window to add them to your library.
+- **Move your music** to a new folder and Atmosphere offers to bring everything along, including play counts, likes and playlists.
 - **Multi-select** with Ctrl/Shift-click. Drag songs onto playlists, play next, add to queue, edit tags, **remove from library** (the file stays) or **delete from device** (sent to the Recycle Bin or Trash).
 
 ### Player
-- Queue, shuffle and repeat. Resumes where you left off, works with OS media keys, and counts plays.
+- **Gapless playback:** the next song is always loaded ahead and blended in as the current one ends, so albums and mixes flow without a gap, and skipping is instant.
+- **Crossfade** (optional, up to 12 s). Songs from the same album always stay gapless.
+- **Even out volume** (optional): plays quiet and loud songs at a similar level, using ReplayGain tags or a one-time measurement. Files are never changed.
+- Queue, shuffle and repeat. Save the queue as a playlist. Resumes where you left off, and songs over 20 minutes pick up mid-song. Works with OS media keys, and counts plays.
+- **Sleep timer** that fades out, or stops at the end of the song.
+- **Song info:** format, bitrate, sample rate, size, plays, dates and location.
+- **Music videos:** save a video and its audio together, then switch to the video (`V`) at the same moment without interrupting the song.
 - **Sound panel:**
   - Presets: Bass boost, Vocal, Rock, Hip-hop, Nightcore, Slowed + reverb, Vaporwave, Lo-fi, 8D, Concert hall, and your own.
   - A 10-band EQ you shape by dragging.
@@ -66,7 +81,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
   - **Pitch** (±12 semitones) and **tempo** (0.5×–2×), changed independently, or linked in **Vinyl** mode.
   - An Effects on/off switch for instant comparison.
 - **TV mode** (`F`): full-screen with the cover-art backdrop and big synced lyrics, or a visualizer when there are none. Sends to a second screen when one is connected.
-- **Mini player** (`P`): a small window with optional cover art, a blurred-cover backdrop, a queue you can drag to reorder, and always-on-top.
+- **Mini player** (`P`): resize it into a card, a wide strip (art left, controls right) or a tiny bar. It has optional cover art, a blurred-cover backdrop, a lyrics preview or a reorderable queue, and always-on-top.
 
 ### Lyrics
 - Synced line by line, plus **word by word** when the source supports it. Click a line to jump, nudge the timing, and save `.lrc` files.
@@ -88,6 +103,8 @@ It's built for media you **own or have the rights to keep**, such as your own up
 ### Downloads
 - One bar for links and search (YouTube and SoundCloud). Paste anywhere, drag links in, or accept the "Use copied link" offer.
 - **Direct file links** ending in `.mp3`, `.wav`, `.flac`, `.mp4` and similar are checked first to make sure they're real media, then read for their actual bitrate, length, tags and cover art.
+- **Organized folders:** albums go in `Albums`, playlists in `Playlists` (where they show up as playlists) and single songs in `Tracks`.
+- **Clean titles:** YouTube's "(Official Music Video)" and similar tags are removed, and "Artist - Title" uploads get the real artist. When you save only the sound of a music video, Atmosphere prefers the artist's official audio upload.
 - **Release detection:** Album, EP, Single, LP, Compilation, Mixtape, Playlist, Profile and Channel. This drives track numbering, album tags and folder names.
 - **Save as** describes outcomes:
   - Original file
@@ -207,6 +224,7 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/backup.rs` | Backup and restore of settings, stats and liked songs |
 | `src/api.rs` | The opt-in local API for other apps ([guide](docs/api.md)) |
 | `src/updates.rs` | Signed in-app updates from GitHub Releases ([releasing](docs/releasing.md)) |
+| `src/artistinfo.rs` | Artist photos, bios and logos from Deezer, Wikipedia and Wikidata |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
 | `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |
