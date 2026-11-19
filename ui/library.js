@@ -7,7 +7,7 @@ const Lib = {
   artists: new Map(),
   liked: new Set(),
   plays: {},
-  route: { name: "songs" },
+  route: { name: "home" },
   back: [],
   filter: "",
   sort: { key: "artist", dir: 1 },
@@ -120,7 +120,7 @@ async function loadLibrary() {
   if (!Lib.restored) {
     Lib.restored = true;
     Player.restore((id) => Lib.byId.get(id));
-    if (Lib.songs.length && state.view === "get" && !state.collections.length) openLib("songs", null, false);
+    if (state.view === "get" && !state.collections.length) openLib("home", null, false);
   } else {
     Player.refreshTracks((id) => Lib.byId.get(id) || null);
   }
@@ -758,6 +758,78 @@ function playlistView(root, name) {
   root.append(h("div", { class: "pad-x" }, h("p", { class: "muted small hint-line" }, p.linked ? "This is your own folder; songs in subfolders are included. Drag rows to reorder, saved in a playlist.m3u8 inside it." : "Drag rows to reorder. The order is saved in the folder's playlist.m3u8, so other players see it too."), trackList(tracks, { cover: true, playlist: p.name })));
 }
 
+function greeting() {
+  const hr = new Date().getHours();
+  return hr < 5 ? "Up late" : hr < 12 ? "Good morning" : hr < 18 ? "Good afternoon" : "Good evening";
+}
+
+function trackCard(t) {
+  return h("div", { class: "card-tile", role: "button", tabindex: "0", "data-id": t.id, onclick: () => playList([t]), onkeydown: (e) => { if (e.key === "Enter") playList([t]); } },
+    h("div", { class: "tile-art" }, cover(t.art, "tile-img", t.title), h("button", { class: "tile-play", "aria-label": `Play ${t.title}`, onclick: (e) => { e.stopPropagation(); playList([t]); } }, icon("player-play-filled"))),
+    h("div", { class: "tile-title" }, t.title),
+    h("div", { class: "tile-sub" }, h("span", { class: "tile-kind" }, "Song"), ` · ${primaryArtist(t.artist)}`));
+}
+
+function playlistCard(p) {
+  const tracks = p.order.map((id) => Lib.byId.get(id)).filter(Boolean);
+  const arts = [...new Set(tracks.map((t) => t.art).filter(Boolean))].slice(0, 4);
+  const art = arts.length >= 4 ? h("div", { class: "tile-img tile-mosaic" }, ...arts.map((k) => cover(k, ""))) : arts.length ? cover(arts[0], "tile-img", p.name) : h("div", { class: "tile-img ph" }, icon(p.linked ? "folder" : "playlist"));
+  return h("div", { class: "card-tile", role: "button", tabindex: "0", "data-playlist": p.name, onclick: () => openLib("playlist", p.name), onkeydown: (e) => { if (e.key === "Enter") openLib("playlist", p.name); } },
+    h("div", { class: "tile-art" }, art, tracks.length ? h("button", { class: "tile-play", "aria-label": `Play ${p.name}`, onclick: (e) => { e.stopPropagation(); playList(tracks); } }, icon("player-play-filled")) : null),
+    h("div", { class: "tile-title" }, p.name),
+    h("div", { class: "tile-sub" }, h("span", { class: "tile-kind" }, "Playlist"), ` · ${plural(tracks.length, "song")}`));
+}
+
+function contextsFrom(tracks, limit) {
+  const out = [];
+  const seen = new Set();
+  for (const t of tracks) {
+    const a = t.album ? Lib.albums.get(`${lnorm(t.albumArtist || primaryArtist(t.artist))}|${lnorm(t.album)}`) : null;
+    const key = a ? `a:${a.key}` : `t:${t.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a && a.tracks.length > 1 ? albumCard(a) : trackCard(t));
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function shelf(title, cards, more) {
+  if (!cards.length) return null;
+  return h("section", { class: "shelf-sec" },
+    h("div", { class: "sec-row" }, h("h2", { class: "sec" }, title), more ? h("button", { class: "link muted small", onclick: more }, "Show all") : null),
+    h("div", { class: "grid shelf" }, ...cards));
+}
+
+function homeView(root) {
+  const songs = Lib.songs;
+  root.append(
+    h("header", { class: "home-head" },
+      h("div", {},
+        h("h1", {}, greeting()),
+        h("p", { class: "view-sub" }, songs.length ? [plural(songs.length, "song"), plural(Lib.albums.size, "album"), plural(Lib.artists.size, "artist")].join(" · ") : "Let's get some music in here.")),
+      songs.length
+        ? h("div", { class: "row home-quick" },
+            h("button", { class: "btn primary", onclick: () => playList(songs, Math.floor(Math.random() * songs.length), true) }, icon("arrows-shuffle"), "Shuffle everything"),
+            Lib.liked.size ? h("button", { class: "btn", onclick: () => openLib("liked") }, icon("heart"), "Liked songs") : null,
+            h("button", { class: "btn ghost", onclick: () => openLib("stats") }, icon("chart-bar"), "Your stats"))
+        : null)
+  );
+  if (!songs.length) return root.append(emptyLibrary());
+  const last = Lib.data?.lastPlayed || {};
+  const recent = songs.filter((t) => last[t.id]).sort((a, b) => last[b.id] - last[a.id]);
+  const added = [...songs].sort((a, b) => (b.added || 0) - (a.added || 0));
+  const top = songs.filter((t) => Lib.plays[t.id]).sort((a, b) => (Lib.plays[b.id] || 0) - (Lib.plays[a.id] || 0)).slice(0, 5);
+  const lists = (Lib.data?.playlists || []).filter((p) => !p.missing && p.order.length);
+  const body = h("div", { class: "pad-x sections home" },
+    shelf("Jump back in", contextsFrom(recent, 12)),
+    shelf("Recently added", contextsFrom(added, 12), () => { Lib.sort = { key: "added", dir: 1 }; openLib("songs"); }),
+    top.length ? h("section", { class: "shelf-sec" }, h("div", { class: "sec-row" }, h("h2", { class: "sec" }, "On repeat"), h("button", { class: "link muted small", onclick: () => { Lib.sort = { key: "plays", dir: 1 }; openLib("songs"); } }, "Show all")), trackList(top, { cover: true, list: top })) : null,
+    shelf("Your playlists", lists.slice(0, 12).map(playlistCard)));
+  if (!recent.length && !top.length) body.prepend(h("p", { class: "muted home-hint" }, "Play a few songs and this page fills up with your favourites."));
+  root.append(body);
+}
+
 function likedView(root) {
   const list = filtered(Lib.songs.filter((t) => Lib.liked.has(t.id)));
   root.append(libHead("Liked songs", plural(list.length, "song"), playBtns(list), { search: true, onSearch: () => renderLib(true) }));
@@ -774,7 +846,7 @@ function renderLib(soft = false) {
   root.replaceChildren();
   Lib.drawSongs = null;
   const r = Lib.route;
-  ({ songs: songsView, albums: albumsView, album: (x) => albumView(x, r.id), artists: artistsView, artist: (x) => artistView(x, r.id), playlist: (x) => playlistView(x, r.id), liked: likedView, stats: statsView }[r.name] || songsView)(root);
+  ({ songs: songsView, albums: albumsView, album: (x) => albumView(x, r.id), artists: artistsView, artist: (x) => artistView(x, r.id), playlist: (x) => playlistView(x, r.id), liked: likedView, stats: statsView, home: homeView }[r.name] || homeView)(root);
   scroller.scrollTop = y;
   if (focusSearch) {
     const s = $(".lib-search");

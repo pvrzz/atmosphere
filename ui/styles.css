@@ -1070,3 +1070,17 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 .slider-row { display: flex; align-items: center; gap: var(--s3); flex-shrink: 0; }
 .slider-row .range { width: 180px; }
 .slider-val { min-width: 34px; text-align: right; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* home */
+.home-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s5); flex-wrap: wrap; padding: var(--s8) var(--s8) var(--s5); }
+.home-head h1 { font: 700 30px/1.15 var(--font-display); letter-spacing: -0.02em; margin: 0; }
+.home-quick { flex-wrap: wrap; }
+.home { display: grid; gap: var(--s6); padding-bottom: var(--s8); }
+.home-hint { margin: 0; }
+.sec-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s3); margin-bottom: var(--s3); }
+.sec-row .sec { margin: 0; }
+.grid.shelf { grid-template-rows: auto; grid-auto-rows: 0; overflow: hidden; row-gap: 0; padding: var(--s2); margin: calc(var(--s2) * -1); }
+.tile-mosaic { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; }
+.tile-mosaic img, .tile-mosaic .cover { width: 100%; height: 100%; object-fit: cover; border-radius: 0; }
+.tile-img.ph { display: grid; place-items: center; background: var(--surface); color: var(--text-3); }
+.tile-img.ph .i svg { width: 36px; height: 36px; }

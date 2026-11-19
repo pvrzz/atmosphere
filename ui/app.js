@@ -421,10 +421,10 @@ function bindShell() {
 }
 
 function go(view) {
-  if (state.view === view) return;
+  $$(".nav-item[data-nav]").forEach((b) => b.dataset.nav === view ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
+  if (state.view === view) return markLibNav();
   state.view = view;
   $$(".view").forEach((v) => (v.hidden = v.dataset.view !== view));
-  $$(".nav-item[data-nav]").forEach((b) => b.dataset.nav === view ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   closeSaveMenu();
   closeMenus();
   if (view !== "library") closeDrawers();
