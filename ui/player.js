@@ -37,6 +37,7 @@ const Player = {
   standbyIndex: -1,
   deckNodes: null,
   transitionTimer: 0,
+  stopAfterCurrent: false,
   crossfade: 0,
   leveling: false,
   ctx: null,
@@ -290,7 +291,7 @@ const Player = {
 
   scheduleTransition() {
     const a = this.audio;
-    if (this.transitionTimer || a.paused || this.standbyIndex < 0 || !isFinite(a.duration)) return;
+    if (this.transitionTimer || this.stopAfterCurrent || a.paused || this.standbyIndex < 0 || !isFinite(a.duration)) return;
     const rate = a.playbackRate || 1;
     const remaining = (a.duration - a.currentTime) / rate;
     const fade = this.fadeFor();
@@ -596,6 +597,12 @@ Player.on = (type, fn) => Player.decks.forEach((el) => el.addEventListener(type,
   on("ended", () => {
     Player.cancelTransition();
     Player.flushListen();
+    if (Player.stopAfterCurrent) {
+      Player.stopAfterCurrent = false;
+      Player.emit("state");
+      Player.emit("sleep");
+      return;
+    }
     if (Player.standbyIndex >= 0 && Player.standbyIndex === Player.nextIndex()) Player.load(Player.standbyIndex);
     else Player.next(true);
   });

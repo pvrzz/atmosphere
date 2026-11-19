@@ -365,6 +365,7 @@ function trackMenu(e, t, ctx, i) {
     albumKey && { label: "Go to album", run: () => openLib("album", albumKey) },
     { label: "Go to artist", run: () => openLib("artist", lnorm(t.albumArtist || primaryArtist(t.artist))) },
     "-",
+    { label: "Song info…", run: () => songInfo(t) },
     { label: "Edit info…", run: () => editInfo(t) },
     { label: "Show lyrics", run: () => { if (Player.current?.id !== t.id) playList(ctx.list, i); openLyrics(); } },
     { label: "Show in folder", run: () => invoke("reveal", { path: t.path }) },

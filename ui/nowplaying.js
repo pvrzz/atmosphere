@@ -253,7 +253,7 @@ function renderQueue() {
     cover(t.art, "lt-cover"), h("div", { class: "lt-main" }, h("span", { class: "lt-title" }, t.title), h("span", { class: "lt-sub" }, t.artist)),
     isNow ? h("span", { class: "flag" }, "Now") : h("button", { class: "icon-btn", "aria-label": `Remove ${t.title}`, onclick: () => Player.removeAt(i) }, icon("x")));
   panel.replaceChildren(
-    h("div", { class: "drawer-head" }, h("h2", {}, "Queue"), h("div", { class: "row" }, next.length ? h("button", { class: "btn small ghost", onclick: () => Player.clearUpNext() }, "Clear") : null, h("button", { class: "icon-btn", "aria-label": "Close", onclick: closeDrawers }, icon("x")))),
+    h("div", { class: "drawer-head" }, h("h2", {}, "Queue"), h("div", { class: "row" }, Player.queue.length > 1 ? h("button", { class: "btn small ghost", title: "Save the queue as a playlist", onclick: saveQueueAsPlaylist }, icon("playlist-add"), "Save") : null, next.length ? h("button", { class: "btn small ghost", onclick: () => Player.clearUpNext() }, "Clear") : null, h("button", { class: "icon-btn", "aria-label": "Close", onclick: closeDrawers }, icon("x")))),
     h("div", { class: "drawer-body" },
       now ? row(now, Player.index, true) : h("p", { class: "muted pad" }, "Nothing playing."),
       next.length ? h("h3", { class: "q-sub" }, `Up next · ${next.length}`) : null,
