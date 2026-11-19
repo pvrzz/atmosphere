@@ -13,6 +13,7 @@ use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const AUDIO_EXT: [&str; 9] = ["mp3", "m4a", "flac", "ogg", "opus", "wav", "aac", "aiff", "aif"];
+pub const VIDEO_EXT: [&str; 5] = ["mp4", "m4v", "mkv", "webm", "mov"];
 const ORDER_FILE: &str = "playlist.m3u8";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -41,6 +42,7 @@ pub struct Track {
     pub gain_db: Option<f32>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u8>,
+    pub video: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -187,6 +189,20 @@ pub fn is_audio(p: &Path) -> bool {
     p.extension().and_then(|e| e.to_str()).is_some_and(|e| AUDIO_EXT.contains(&e.to_ascii_lowercase().as_str()))
 }
 
+pub fn is_video(p: &Path) -> bool {
+    p.extension().and_then(|e| e.to_str()).is_some_and(|e| VIDEO_EXT.contains(&e.to_ascii_lowercase().as_str()))
+}
+
+fn sibling(p: &Path, exts: &[&str]) -> Option<PathBuf> {
+    let stem = p.file_stem()?;
+    let dir = p.parent()?;
+    exts.iter().map(|e| dir.join(stem).with_extension(e)).find(|c| c != p && c.is_file())
+}
+
+pub fn is_playable(p: &Path) -> bool {
+    is_audio(p) || (is_video(p) && sibling(p, &AUDIO_EXT).is_none())
+}
+
 fn file_stamp(p: &Path) -> Option<(u64, u64)> {
     let m = std::fs::metadata(p).ok()?;
     let mtime = m.modified().ok()?.duration_since(UNIX_EPOCH).ok()?.as_secs();
@@ -214,6 +230,22 @@ fn year_of(s: &str) -> Option<u32> {
 }
 
 pub fn read_track(path: &Path, playlist: Option<String>) -> Result<Track> {
+    let mut t = match read_tags(path, playlist.clone()) {
+        Ok(t) => t,
+        Err(e) if is_video(path) => {
+            let (size, mtime) = file_stamp(path).ok_or(e)?;
+            let path_s = path.to_string_lossy().into_owned();
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_string();
+            let (artist, title) = crate::media::split_artist_title(&stem).unwrap_or((String::new(), stem));
+            Track { id: hash(&path_s), title, artist, format: path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase(), size, mtime, playlist, added: now(), path: path_s, ..Default::default() }
+        }
+        Err(e) => return Err(e),
+    };
+    t.video = if is_video(path) { Some(t.path.clone()) } else { sibling(path, &VIDEO_EXT).map(|v| v.to_string_lossy().into_owned()) };
+    Ok(t)
+}
+
+fn read_tags(path: &Path, playlist: Option<String>) -> Result<Track> {
     let (size, mtime) = file_stamp(path).ok_or_else(|| anyhow!("unreadable"))?;
     let file = lofty::read_from_path(path)?;
     let props = file.properties();
@@ -254,6 +286,7 @@ pub fn read_track(path: &Path, playlist: Option<String>) -> Result<Track> {
         gain_db,
         sample_rate: props.sample_rate(),
         channels: props.channels(),
+        video: None,
         path: path_s,
     })
 }
@@ -311,7 +344,7 @@ impl Library {
 
     pub fn open_paths(&self, paths: &[PathBuf]) -> Vec<Track> {
         let mut out = Vec::new();
-        for p in paths.iter().filter(|p| p.is_file() && is_audio(p)) {
+        for p in paths.iter().filter(|p| p.is_file() && is_playable(p)) {
             let key = p.to_string_lossy();
             if let Some(t) = self.tracks.read().unwrap().values().find(|t| t.path == key).cloned() {
                 out.push(t);
@@ -348,7 +381,7 @@ impl Library {
             for root in all_roots.iter().filter(|r| r.is_dir()) {
                 for entry in walkdir::WalkDir::new(root).follow_links(false).into_iter().filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.')).flatten() {
                     let p = entry.path();
-                    if entry.file_type().is_file() && is_audio(p) && seen.insert(p.to_path_buf()) {
+                    if entry.file_type().is_file() && is_playable(p) && seen.insert(p.to_path_buf()) {
                         files.push(p.to_path_buf());
                     }
                 }
@@ -596,7 +629,7 @@ impl Library {
         let mut found = Vec::new();
         for e in walkdir::WalkDir::new(folder).follow_links(false).into_iter().filter_entry(|e| !e.file_name().to_string_lossy().starts_with('.')).flatten() {
             let p = e.path();
-            if e.file_type().is_file() && is_audio(p) && !hidden.contains(&*p.to_string_lossy()) {
+            if e.file_type().is_file() && is_playable(p) && !hidden.contains(&*p.to_string_lossy()) {
                 if let Ok(t) = read_track(p, self.playlist_for(p, playlists_dir)) {
                     found.push(t);
                 }

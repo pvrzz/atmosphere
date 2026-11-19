@@ -202,7 +202,7 @@ function trackRow(t, i, ctx) {
     h("span", { class: "lt-num" }, playing ? eqBars() : label,
       h("button", { class: "lt-play", "aria-label": `Play ${t.title}`, onclick: (e) => { e.stopPropagation(); playList(ctx.list, i); } }, icon("player-play-filled"))),
     ctx.cover ? cover(t.art, "lt-cover") : null,
-    h("div", { class: "lt-main" }, h("span", { class: "lt-title" }, t.title), ctx.hideArtist && !ctx.showArtistFor?.(t) ? null : h("span", { class: "lt-sub" }, artistLinks(t))),
+    h("div", { class: "lt-main" }, h("span", { class: "lt-title" }, t.title, t.video ? h("span", { class: "badge-video", title: "Has a music video" }, icon("video")) : null), ctx.hideArtist && !ctx.showArtistFor?.(t) ? null : h("span", { class: "lt-sub" }, artistLinks(t))),
     ctx.hideAlbum ? h("span") : h("span", { class: "lt-album" }, t.album ? h("button", { class: "link", onclick: (e) => { e.stopPropagation(); openLib("album", `${lnorm(t.albumArtist || primaryArtist(t.artist))}|${lnorm(t.album)}`); } }, t.album) : ""),
     likeBtn(t),
     h("span", { class: "lt-dur" }, fmtDur(t.durationMs)),

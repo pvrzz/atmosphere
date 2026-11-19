@@ -173,6 +173,7 @@ cargo tauri build
 | `L` | Lyrics |
 | `Q` | Queue |
 | `F` | TV mode |
+| `V` | Show the music video, when a song has one |
 | `Ctrl K` | Search your library, or paste a link |
 | `Ctrl L` | Get: the link and online search bar |
 | `Ctrl B` | Collapse or expand the sidebar |

@@ -66,11 +66,11 @@ fn apply_changes(app: &AppHandle, paths: HashSet<PathBuf>) {
             touched |= state.library.remove_under(&p) > 0;
         } else if p.is_dir() {
             for e in walkdir::WalkDir::new(&p).into_iter().flatten().filter(|e| e.file_type().is_file()) {
-                if crate::library::is_audio(e.path()) && !state.library.knows(e.path()) {
+                if crate::library::is_playable(e.path()) && !state.library.knows(e.path()) {
                     touched |= state.library.add_file(e.path(), &pl).is_ok();
                 }
             }
-        } else if crate::library::is_audio(&p) && !state.library.knows(&p) {
+        } else if crate::library::is_playable(&p) && !state.library.knows(&p) {
             touched |= state.library.add_file(&p, &pl).is_ok();
         }
     }
@@ -432,12 +432,16 @@ pub fn set_fullscreen(app: AppHandle, on: bool) -> CmdResult<bool> {
 fn mime(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase().as_str() {
         "mp3" => "audio/mpeg",
-        "m4a" | "mp4" | "aac" => "audio/mp4",
+        "m4a" | "aac" => "audio/mp4",
         "flac" => "audio/flac",
         "ogg" => "audio/ogg",
         "opus" => "audio/ogg; codecs=opus",
         "wav" => "audio/wav",
         "aiff" | "aif" => "audio/aiff",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mkv" => "video/x-matroska",
+        "mov" => "video/quicktime",
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
         _ => "application/octet-stream",
@@ -497,6 +501,10 @@ pub fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
         "t" => match state.library.track(id) {
             Some(t) => stream(Path::new(&t.path), range),
             None => respond(404, "text/plain", b"unknown track".to_vec(), &[]),
+        },
+        "v" => match state.library.track(id).and_then(|t| t.video) {
+            Some(v) => stream(Path::new(&v), range),
+            None => respond(404, "text/plain", b"no video".to_vec(), &[]),
         },
         "a" => match state.library.art_path(id) {
             Some(p) if p.extension().is_some_and(|e| e == "png") => match std::fs::read(&p) {

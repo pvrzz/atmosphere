@@ -11,6 +11,8 @@ function rangeFill(el) {
 function updatePlayerBar() {
   const t = Player.current;
   $("#player").classList.toggle("idle", !t);
+  $("#videoBtn").hidden = !t?.video;
+  $("#videoBtn").setAttribute("aria-pressed", String(!!(t?.video && Player.showVideo && Lyr.tv)));
   $("#npArt").replaceChildren(t ? cover(t.art, "np-cover", t.album || t.title) : h("div", { class: "np-cover ph" }, icon("music")));
   $("#npTitle").textContent = t ? t.title : "Nothing playing";
   $("#npArtist").replaceChildren(t ? artistLinks(t) : h("span", { class: "muted" }, "Pick something from your library"));
@@ -301,9 +303,11 @@ function bindPlayer() {
   $("#queueBtn").addEventListener("click", () => toggleDrawer("#queuePanel", "#queueBtn", renderQueue));
   $("#lyricsBtn").addEventListener("click", () => toggleDrawer("#lyricsPanel", "#lyricsBtn", renderLyricsPanel));
   $("#tvBtn").addEventListener("click", (e) => chooseTvScreen(e.currentTarget));
+  $("#videoBtn").addEventListener("click", toggleVideo);
   document.addEventListener("click", (e) => { if (e.target.isConnected && !$("#fxPanel").hidden && !e.target.closest("#fxPanel, #fxBtn, .modal-wrap")) closeFx(); });
   window.addEventListener("player", (e) => {
     const type = e.detail.type;
+    if (Lyr.tv && type !== "volume" && type !== "fx") syncVideo();
     if (type === "time") return updateTime();
     if (type === "volume") return updateVolume();
     if (type === "fx") return $("#fxBtn").setAttribute("aria-pressed", String(fxActive()));
@@ -325,6 +329,7 @@ function bindPlayer() {
     else if (k.toLowerCase() === "l" && !mod) $("#lyricsBtn").click();
     else if (k.toLowerCase() === "q" && !mod) $("#queueBtn").click();
     else if (k.toLowerCase() === "f" && !mod) openTv();
+    else if (k.toLowerCase() === "v" && !mod && Player.current?.video) toggleVideo();
   });
   updatePlayerBar();
   updateTime();

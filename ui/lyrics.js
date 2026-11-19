@@ -206,9 +206,14 @@ function renderTv() {
   tv.classList.toggle("no-lyrics", !showCol);
   const note = !t ? null : Lyr.loading ? null : l?.instrumental ? "Instrumental" : !hasLyrics ? (Lyr.error ? "Lyrics sources unreachable" : "No lyrics found for this song") : `Lyrics · ${l.provider}`;
   const bg = t?.art ? `background-image:url("${artUrl(t.art)}")` : "";
+  const withVideo = !!(t?.video && Player.showVideo);
+  tv.classList.toggle("video", withVideo);
+  const layer = withVideo ? h("video", { class: "tv-video", id: "tvVideo", src: mediaUrl("v", t.id), playsinline: true, preload: "auto" }) : h("div", { class: "tv-bg", style: bg });
+  if (withVideo) layer.muted = true;
   tv.replaceChildren(
-    h("div", { class: "tv-bg", style: bg }),
+    layer,
     h("button", { class: "icon-btn tv-close", "aria-label": "Exit TV mode", onclick: closeTv }, icon("minimize")),
+    t?.video ? h("button", { class: `btn small tv-video-btn ${withVideo ? "on" : ""}`, onclick: () => { Player.showVideo = !Player.showVideo; renderTv(); updatePlayerBar(); } }, icon(withVideo ? "photo" : "video"), withVideo ? "Show cover" : "Show video") : null,
     h("div", { class: "tv-stage" },
       h("div", { class: "tv-now" },
         t ? cover(t.art, "tv-cover", t.album || t.title) : h("div", { class: "tv-cover ph" }, icon("music")),
@@ -225,6 +230,33 @@ function renderTv() {
   );
   Lyr.active = -1;
   startTick();
+  if (withVideo) {
+    layer.addEventListener("loadedmetadata", syncVideo, { once: true });
+    syncVideo();
+  }
+}
+
+function syncVideo() {
+  const v = $("#tvVideo");
+  if (!v) return;
+  const a = Player.audio;
+  v.playbackRate = a.playbackRate || 1;
+  if (v.readyState >= 1 && Math.abs(v.currentTime - a.currentTime) > 0.25) v.currentTime = Math.min(a.currentTime, Math.max(0, (v.duration || a.currentTime) - 0.05));
+  if (a.paused && !v.paused) v.pause();
+  else if (!a.paused && v.paused) v.play().catch(() => {});
+}
+
+function toggleVideo() {
+  if (!Player.current?.video) return;
+  if (Lyr.tv && Player.showVideo) {
+    Player.showVideo = false;
+    renderTv();
+  } else {
+    Player.showVideo = true;
+    if (Lyr.tv) renderTv();
+    else openTv();
+  }
+  updatePlayerBar();
 }
 
 function drawViz() {

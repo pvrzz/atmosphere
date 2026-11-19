@@ -1116,7 +1116,9 @@ function renderSaveMenu() {
   const heights = caps.heights.length ? caps.heights.filter((x) => x >= 360) : [2160, 1440, 1080, 720, 480];
   const vid = h("div", {},
     h("div", { class: "chips" }, h("button", { class: "chip", "aria-pressed": String(s.videoHeight === 0), onclick: () => patchSave({ videoHeight: 0 }) }, "Best"), ...heights.map((x) => h("button", { class: "chip", "aria-pressed": String(s.videoHeight === x), onclick: () => patchSave({ videoHeight: x }) }, `${x}p`))),
-    h("div", { class: "chips" }, ...["mp4", "mkv"].map((k) => h("button", { class: "chip", "aria-pressed": String(s.videoContainer === k), onclick: () => patchSave({ videoContainer: k }) }, k.toUpperCase())))
+    h("div", { class: "chips" }, ...["mp4", "mkv"].map((k) => h("button", { class: "chip", "aria-pressed": String(s.videoContainer === k), onclick: () => patchSave({ videoContainer: k }) }, k.toUpperCase()))),
+    h("label", { class: "keep-audio" }, h("input", { type: "checkbox", class: "switch", checked: s.videoKeepAudio !== false, onchange: (e) => patchSave({ videoKeepAudio: e.target.checked }) }),
+      h("span", {}, h("strong", {}, "Also keep an audio file"), h("small", {}, "Recommended. Play it as a song, and switch to the video at the same moment any time.")))
   );
   const lossless = h("div", { class: "chips" }, ...["flac", "wav"].map((k) => h("button", { class: "chip", "aria-pressed": String(s.saveAs === k), onclick: () => patchSave({ saveAs: k }) }, k.toUpperCase())));
   const noFf = !state.tools?.ffmpeg.path;

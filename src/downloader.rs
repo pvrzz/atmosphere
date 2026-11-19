@@ -352,6 +352,26 @@ impl Job {
                 notes.push(format!("Saved, but your metadata edits couldn't be written ({e})."));
             }
         }
+        let path = if plan.video && settings.video_keep_audio {
+            match (tools.ffmpeg.as_deref(), &path) {
+                (Some(ff), video) => match extract_audio(ff, video).await {
+                    Ok(audio) => {
+                        if settings.embed_metadata {
+                            let _ = tagging::apply(&audio, &req.meta, &req.entry.url, Some(ff)).await;
+                        }
+                        notes.push("Saved the video and a matching audio file. Play it as a song, and show the video any time.".into());
+                        audio
+                    }
+                    Err(e) => {
+                        notes.push(format!("Saved the video, but the audio file couldn't be made ({e})."));
+                        path
+                    }
+                },
+                _ => path,
+            }
+        } else {
+            path
+        };
         self.progress = 1.0;
         let note = (!notes.is_empty()).then(|| notes.join(" "));
         self.emit("done", note, Some(&path));
@@ -656,6 +676,29 @@ async fn cleanup(dir: &Path, stem: &str) {
     }
 }
 
+pub async fn extract_audio(ffmpeg: &Path, video: &Path) -> Result<PathBuf> {
+    let mp4 = video.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4") || e.eq_ignore_ascii_case("m4v") || e.eq_ignore_ascii_case("mov"));
+    let attempts: Vec<(&str, Vec<&str>)> = if mp4 {
+        vec![("m4a", vec!["-c:a", "copy"]), ("m4a", vec!["-c:a", "aac", "-b:a", "256k"])]
+    } else {
+        vec![("opus", vec!["-c:a", "copy"]), ("m4a", vec!["-c:a", "aac", "-b:a", "256k"])]
+    };
+    for (ext, codec) in attempts {
+        let out = video.with_extension(ext);
+        let mut args: Vec<String> = ["-hide_banner", "-loglevel", "error", "-y", "-i"].map(String::from).into();
+        args.push(video.to_string_lossy().into_owned());
+        args.extend(["-map", "0:a:0", "-vn", "-map_metadata", "0"].map(String::from));
+        args.extend(codec.iter().map(|c| c.to_string()));
+        args.push(out.to_string_lossy().into_owned());
+        let ok = engine::command(ffmpeg).args(&args).stdout(Stdio::null()).stderr(Stdio::null()).status().await.is_ok_and(|s| s.success());
+        if ok && out.metadata().is_ok_and(|m| m.len() > 0) {
+            return Ok(out);
+        }
+        let _ = tokio::fs::remove_file(&out).await;
+    }
+    bail!("ffmpeg couldn't read the video's audio")
+}
+
 pub fn target_dir(settings: &Settings, req: &JobRequest) -> PathBuf {
     let base = PathBuf::from(&settings.output_dir);
     let named = req.folder.as_deref().map(str::trim).filter(|n| !n.is_empty() && settings.collection_folders);
@@ -770,6 +813,35 @@ mod tests {
         assert_eq!(p.sort.as_deref(), Some("res:720,vcodec:h264,acodec:aac"));
         assert!(plan(&entry(Some(128), false, vec![]), &save(SaveAs::Video, 0, 1080), true).is_err());
         assert!(plan(&entry(Some(128), false, vec![720]), &save(SaveAs::Mp3, 320, 0), false).is_err());
+    }
+
+    #[tokio::test]
+    async fn keeps_an_audio_file_beside_a_video_and_pairs_them() {
+        let Some(ff) = engine::find_tool("ffmpeg") else { return };
+        let dir = std::env::temp_dir().join(format!("atmo-video-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("Westwood - Eyes.mp4");
+        let made = engine::command(&ff)
+            .args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=160x90:rate=10", "-f", "lavfi", "-i", "sine=frequency=440", "-t", "2", "-c:v", "libx264", "-c:a", "aac", "-shortest"])
+            .arg(&video)
+            .status()
+            .await
+            .is_ok_and(|s| s.success());
+        if !made {
+            return;
+        }
+        let audio = extract_audio(&ff, &video).await.unwrap();
+        assert_eq!(audio.extension().unwrap(), "m4a");
+        assert!(crate::library::is_playable(&audio));
+        assert!(!crate::library::is_playable(&video));
+        let t = crate::library::read_track(&audio, None).unwrap();
+        assert_eq!(t.video.as_deref(), Some(&*video.to_string_lossy()));
+        std::fs::remove_file(&audio).unwrap();
+        assert!(crate::library::is_playable(&video));
+        let v = crate::library::read_track(&video, None).unwrap();
+        assert_eq!(v.video.as_deref(), Some(&*video.to_string_lossy()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
