@@ -652,3 +652,58 @@ pub async fn artist_media(app: AppHandle, state: State<'_, AppState>, name: Stri
     };
     state.library.artist_media(&name, &kind, image.as_deref()).map_err(err)
 }
+
+pub fn audio_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
+    args.into_iter()
+        .filter(|a| !a.starts_with('-'))
+        .map(|a| a.strip_prefix("file://").map(|p| p.to_string()).unwrap_or(a))
+        .filter(|a| {
+            let p = Path::new(a);
+            p.is_file() && crate::library::is_audio(p)
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn open_files(state: State<'_, AppState>, paths: Vec<String>) -> Vec<Track> {
+    let list: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    state.library.open_paths(&list)
+}
+
+#[tauri::command]
+pub fn startup_files(state: State<'_, AppState>) -> Vec<String> {
+    std::mem::take(&mut *state.pending_open.lock().unwrap())
+}
+
+#[tauri::command]
+pub async fn import_file(app: AppHandle, state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> CmdResult<Track> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("Expected file contents".into()) };
+    let raw_name = request.headers().get("x-file-name").and_then(|v| v.to_str().ok()).unwrap_or("Imported song");
+    let name: String = url::form_urlencoded::parse(format!("n={raw_name}").as_bytes()).next().map(|(_, v)| v.into_owned()).unwrap_or_default();
+    let name: String = name.chars().map(|c| if r#"<>:"/\|?*"#.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let path0 = Path::new(&name);
+    if !crate::library::is_audio(path0) || bytes.is_empty() {
+        return Err("That isn't an audio file Atmosphere can play.".into());
+    }
+    let s = state.snapshot();
+    let dir = PathBuf::from(&s.output_dir).join("Imported");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = path0.file_stem().and_then(|x| x.to_str()).unwrap_or("Imported song").to_string();
+    let ext = path0.extension().and_then(|x| x.to_str()).unwrap_or("mp3").to_string();
+    let mut dest = dir.join(format!("{stem}.{ext}"));
+    let mut n = 2;
+    while dest.exists() {
+        if std::fs::metadata(&dest).map(|m| m.len() as usize == bytes.len()).unwrap_or(false) {
+            break;
+        }
+        dest = dir.join(format!("{stem} ({n}).{ext}"));
+        n += 1;
+    }
+    if !dest.exists() {
+        std::fs::write(&dest, bytes).map_err(|e| e.to_string())?;
+    }
+    let (_, pl) = dirs(&state);
+    let track = state.library.add_file(&dest, &pl).map_err(err)?;
+    changed(&app);
+    Ok(track)
+}

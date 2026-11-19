@@ -1141,3 +1141,10 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 .info-path { display: grid; gap: var(--s2); justify-items: start; }
 .info-path code { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; padding: 6px 10px; border-radius: 8px; background: var(--surface-2, var(--surface)); border: 1px solid var(--hairline); width: 100%; box-sizing: border-box; }
 #sleepBtn[aria-pressed="true"] { color: var(--accent); }
+
+/* dropping files */
+.drop-hint { position: fixed; inset: 12px; z-index: 130; border: 2px dashed color-mix(in srgb, var(--accent) 70%, transparent); border-radius: 18px; background: color-mix(in srgb, var(--bg) 82%, transparent); display: grid; place-items: center; pointer-events: none; animation: fadeOnly 120ms var(--ease); }
+.drop-hint > div { display: grid; justify-items: center; gap: 6px; text-align: center; }
+.drop-hint .i svg { width: 40px; height: 40px; color: var(--accent); }
+.drop-hint strong { font: 650 18px/1.3 var(--font-display); }
+.drop-hint span { color: var(--text-2); font-size: 13px; }

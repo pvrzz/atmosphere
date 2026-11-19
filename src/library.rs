@@ -148,6 +148,7 @@ pub struct Library {
     artists: RwLock<HashMap<String, ArtistMeta>>,
     hidden: RwLock<HashSet<String>>,
     linked: RwLock<Vec<Linked>>,
+    opened: RwLock<HashMap<String, Track>>,
     scanning: AtomicBool,
 }
 
@@ -294,6 +295,7 @@ impl Library {
             artists: RwLock::new(load("artists.json")),
             hidden: RwLock::new(load("hidden.json")),
             linked: RwLock::new(load("linked.json")),
+            opened: RwLock::new(HashMap::new()),
             scanning: AtomicBool::new(false),
         }
     }
@@ -304,7 +306,21 @@ impl Library {
     }
 
     pub fn track(&self, id: &str) -> Option<Track> {
-        self.tracks.read().unwrap().get(id).cloned()
+        self.tracks.read().unwrap().get(id).cloned().or_else(|| self.opened.read().unwrap().get(id).cloned())
+    }
+
+    pub fn open_paths(&self, paths: &[PathBuf]) -> Vec<Track> {
+        let mut out = Vec::new();
+        for p in paths.iter().filter(|p| p.is_file() && is_audio(p)) {
+            let key = p.to_string_lossy();
+            if let Some(t) = self.tracks.read().unwrap().values().find(|t| t.path == key).cloned() {
+                out.push(t);
+            } else if let Ok(t) = read_track(p, None) {
+                self.opened.write().unwrap().insert(t.id.clone(), t.clone());
+                out.push(t);
+            }
+        }
+        out
     }
 
     pub fn art_path(&self, key: &str) -> Option<PathBuf> {

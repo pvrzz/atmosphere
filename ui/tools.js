@@ -1,4 +1,4 @@
-// atmosphere · tools.js · Everyday player tools: song info, save the queue as a playlist, sleep timer and resuming long tracks
+// atmosphere · tools.js · Everyday player tools: song info, save queue, sleep timer, resuming long tracks, and opening or dropping audio files
 const Sleep = { until: 0, endOfSong: false, timer: 0, tick: 0, fading: false };
 const RESUME_KEY = "atmo.resume";
 const RESUME_MIN_MS = 20 * 60 * 1000;
@@ -174,4 +174,50 @@ function bindTools() {
   });
   Player.on("pause", saveResume);
   renderSleep();
+}
+
+const AUDIO_FILE = /\.(mp3|flac|wav|m4a|aac|ogg|oga|opus|aiff?|wma|alac)$/i;
+
+function showDropHint() {
+  if ($("#dropHint")) return;
+  document.body.append(h("div", { class: "drop-hint", id: "dropHint" }, h("div", {}, icon("music"), h("strong", {}, "Drop to add to your library"), h("span", {}, "Songs are copied into an Imported folder and start playing."))));
+}
+
+function hideDropHint() {
+  $("#dropHint")?.remove();
+}
+
+async function importDropped(files) {
+  const audio = files.filter((f) => AUDIO_FILE.test(f.name));
+  if (!audio.length) return toast("Those aren't audio files Atmosphere can play.", "err");
+  toast(`Adding ${plural(audio.length, "song")}…`, "");
+  const tracks = [];
+  for (const f of audio) {
+    try {
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      tracks.push(await invoke("import_file", bytes, { headers: { "x-file-name": encodeURIComponent(f.name) } }));
+    } catch (e) {
+      toast(`${f.name}: ${errText(e)}`, "err");
+    }
+  }
+  if (!tracks.length) return;
+  await loadLibrary();
+  const fresh = tracks.map((t) => Lib.byId.get(t.id) || t);
+  Player.setQueue(fresh, 0);
+  toast(`Added ${plural(fresh.length, "song")} to your library`, "ok");
+}
+
+async function openFiles(paths) {
+  if (!paths?.length) return;
+  const tracks = await invoke("open_files", { paths }).catch(() => []);
+  if (!tracks.length) return toast("Atmosphere couldn't open that file.", "err");
+  Player.setQueue(tracks.map((t) => Lib.byId.get(t.id) || t), 0);
+  toast(tracks.length === 1 ? `Playing “${tracks[0].title}”` : `Playing ${plural(tracks.length, "song")}`, "");
+}
+
+async function bindOpenFiles() {
+  listen("atmosphere://open-files", (e) => openFiles(e.payload));
+  const waitLib = () => (Lib.restored ? Promise.resolve() : new Promise((r) => setTimeout(() => waitLib().then(r), 200)));
+  await waitLib();
+  openFiles(await invoke("startup_files").catch(() => []));
 }

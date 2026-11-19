@@ -38,6 +38,7 @@ pub(crate) struct AppState {
     history: Arc<History>,
     pub(crate) library: Arc<library::Library>,
     startup_cleanup: Mutex<Option<(usize, u64)>>,
+    pending_open: Mutex<Vec<String>>,
 }
 
 pub(crate) type CmdResult<T> = Result<T, String>;
@@ -443,6 +444,17 @@ fn main() {
         .expect("http client");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let files = libcmd::audio_args(argv.into_iter().skip(1));
+            if !files.is_empty() {
+                let _ = app.emit("atmosphere://open-files", files);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
@@ -456,7 +468,7 @@ fn main() {
             let cleaned = storage::startup(&settings.lock().unwrap());
             let library = Arc::new(library::Library::load());
             let dl = Arc::new(Downloader::new(app.handle().clone(), settings.clone(), history.clone(), library.clone(), http.clone()));
-            app.manage(AppState { settings: settings.clone(), http: http.clone(), prober: Arc::new(Prober::default()), dl, history, library, startup_cleanup: Mutex::new(Some(cleaned)) });
+            app.manage(AppState { settings: settings.clone(), http: http.clone(), prober: Arc::new(Prober::default()), dl, history, library, startup_cleanup: Mutex::new(Some(cleaned)), pending_open: Mutex::new(libcmd::audio_args(std::env::args().skip(1))) });
             app.manage(api::ApiHub::load());
             api::apply(app.handle());
             libcmd::spawn_scan(app.handle().clone());
@@ -535,6 +547,9 @@ fn main() {
             libcmd::playlist_link,
             libcmd::track_loudness,
             libcmd::tracks_edit,
+            libcmd::open_files,
+            libcmd::startup_files,
+            libcmd::import_file,
             libcmd::artist_fetch,
             libcmd::artist_media,
             libcmd::playlist_cover,
@@ -544,6 +559,17 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building atmosphere")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                let files: Vec<String> = urls.iter().filter_map(|u| u.to_file_path().ok()).map(|p| p.to_string_lossy().into_owned()).collect();
+                let files = libcmd::audio_args(files);
+                if !files.is_empty() {
+                    if let Some(state) = app.try_state::<AppState>() {
+                        state.pending_open.lock().unwrap().extend(files.clone());
+                    }
+                    let _ = app.emit("atmosphere://open-files", files);
+                }
+            }
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.dl.cancel_all();

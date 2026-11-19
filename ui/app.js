@@ -241,6 +241,7 @@ async function init() {
   bindPlaybackSettings();
   bindSearch();
   bindTools();
+  bindOpenFiles();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));
@@ -406,9 +407,17 @@ function bindShell() {
     const t = e.target;
     if (t.nodeType !== 1 || (t.getAttribute("draggable") !== "true" && !t.closest?.('[draggable="true"]'))) e.preventDefault();
   });
-  document.addEventListener("dragover", (e) => e.preventDefault());
+  document.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.types.includes("Files")) showDropHint();
+  });
+  document.addEventListener("dragleave", (e) => {
+    if (!e.relatedTarget) hideDropHint();
+  });
   document.addEventListener("drop", (e) => {
     e.preventDefault();
+    hideDropHint();
+    if (e.dataTransfer.files?.length) return importDropped([...e.dataTransfer.files]);
     const text = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").trim();
     if (/^https?:\/\//i.test(text)) {
       go("get");

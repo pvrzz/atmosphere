@@ -65,7 +65,28 @@
         "type": "downloadBootstrapper"
       }
     },
-    "createUpdaterArtifacts": true
+    "createUpdaterArtifacts": true,
+    "fileAssociations": [
+      {
+        "ext": [
+          "mp3",
+          "flac",
+          "wav",
+          "m4a",
+          "aac",
+          "ogg",
+          "oga",
+          "opus",
+          "aiff",
+          "aif",
+          "wma",
+          "alac"
+        ],
+        "name": "Audio file",
+        "description": "Audio file",
+        "role": "Viewer"
+      }
+    ]
   },
   "plugins": {
     "updater": {
