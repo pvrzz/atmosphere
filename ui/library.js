@@ -654,6 +654,50 @@ function queueLibraryArtists() {
   queueArtistInfo(pending.map((a) => a.name));
 }
 
+async function searchArtistOnline(ar) {
+  let pick = { photo: null, page: null };
+  const input = h("input", { class: "text wide", type: "search", value: ar.name, "aria-label": "Search for this artist", spellcheck: "false" });
+  const photos = h("div", { class: "pick-photos" });
+  const pages = h("div", { class: "pick-pages" });
+  const status = h("p", { class: "muted small" }, "Searching…");
+  const fans = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M fans` : n >= 1e3 ? `${Math.round(n / 1e3)}K fans` : `${n} fans`);
+  const run = async () => {
+    status.textContent = "Searching…";
+    pick = { photo: null, page: null };
+    const r = await invoke("artist_choices", { query: input.value }).catch((e) => (status.textContent = errText(e), null));
+    if (!r) return;
+    photos.replaceChildren(...r.photos.map((p) => {
+      const el = h("button", { class: "pick-photo", type: "button", title: `${p.name} · ${fans(p.fans)}`, onclick: () => { pick.photo = pick.photo === p.full ? null : p.full; $$(".pick-photo", photos).forEach((x) => x.classList.toggle("on", x === el && !!pick.photo)); } },
+        h("img", { src: p.thumb, alt: "", referrerpolicy: "no-referrer", loading: "lazy" }), h("span", {}, p.name), h("small", {}, fans(p.fans)));
+      return el;
+    }));
+    pages.replaceChildren(...r.pages.map((p) => {
+      const el = h("button", { class: `pick-page ${p.music ? "" : "dim"}`, type: "button", onclick: () => { pick.page = pick.page === p.key ? null : p.key; $$(".pick-page", pages).forEach((x) => x.classList.toggle("on", x === el && !!pick.page)); } },
+        h("strong", {}, p.title), h("span", {}, p.description || "No description"));
+      return el;
+    }));
+    status.textContent = r.photos.length || r.pages.length ? "Pick a photo, a Wikipedia page for the bio and logo, or both." : "Nothing found. Try a different spelling.";
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+  const body = h("div", { class: "stack" },
+    h("div", { class: "row" }, input, h("button", { class: "btn", type: "button", onclick: run }, icon("search"), "Search")),
+    status,
+    h("strong", { class: "pick-head" }, "Photos from Deezer"), photos,
+    h("strong", { class: "pick-head" }, "Wikipedia page (bio and logo)"), pages);
+  run();
+  const ok = await modal(`Find ${ar.name} online`, body, [{ label: "Cancel", value: false }, { label: "Use these", value: true, primary: true }]);
+  if (!ok || (!pick.photo && !pick.page)) return null;
+  try {
+    const meta = await invoke("artist_apply", { name: ar.name, photo: pick.photo, page: pick.page });
+    setArtistMeta(ar.name, meta);
+    toast("Artist updated", "ok");
+    return meta;
+  } catch (e) {
+    toast(errText(e), "err");
+    return null;
+  }
+}
+
 async function editArtist(ar) {
   let meta = ar.meta || {};
   const bio = h("textarea", { class: "text area", rows: "6", placeholder: "A few lines about this artist…" }, meta.bio || "");
@@ -681,6 +725,14 @@ async function editArtist(ar) {
       if (errText(e) !== "cancelled") toast(errText(e), "err");
     }
   };
+  const search = h("button", { class: "btn small", type: "button", onclick: async () => {
+    const m = await searchArtistOnline(ar);
+    if (m) {
+      meta = m;
+      bio.value = m.bio || "";
+      draw();
+    }
+  } }, icon("search"), "Search online…");
   const refresh = h("button", { class: "btn small ghost", type: "button", onclick: async (e) => {
     const b = e.currentTarget;
     b.disabled = true;
@@ -707,7 +759,7 @@ async function editArtist(ar) {
     h("div", { class: "stack" }, h("strong", {}, "Logo"), logo,
       h("div", { class: "row" }, h("button", { class: "btn small", type: "button", onclick: act("logo", true) }, "Choose logo…"), h("button", { class: "btn small ghost", type: "button", onclick: act("logo", false) }, "Remove"))),
     h("label", { class: "field" }, h("span", {}, "About"), bio),
-    h("div", { class: "row between" }, h("p", { class: "muted small" }, "Photos come from Deezer and bios and logos from Wikipedia, when found. Anything you change here stays."), refresh));
+    h("div", { class: "row between" }, h("p", { class: "muted small" }, "Photos come from Deezer and bios and logos from Wikipedia. Not the right artist? Search online and pick, or use your own images. Anything you change here stays."), h("div", { class: "row" }, search, refresh)));
   const ok = await modal(`Edit ${ar.name}`, body, [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
   if (ok && bio.value !== (meta.bio || "")) {
     try {

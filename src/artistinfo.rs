@@ -102,6 +102,83 @@ async fn wikidata_file(http: &reqwest::Client, qid: &str, prop: &str) -> Option<
     get_bytes(http, &format!("https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800", path_enc(file))).await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhotoChoice {
+    pub name: String,
+    pub fans: u64,
+    pub thumb: String,
+    pub full: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageChoice {
+    pub key: String,
+    pub title: String,
+    pub description: String,
+    pub music: bool,
+}
+
+pub async fn choices(http: &reqwest::Client, query: &str) -> (Vec<PhotoChoice>, Vec<PageChoice>) {
+    let q = enc(query);
+    let photos = async {
+        let Some(v) = get_json(http, &format!("https://api.deezer.com/search/artist?q={q}&limit=12")).await else { return Vec::new() };
+        v["data"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|a| {
+                        let full = a["picture_xl"].as_str().filter(|u| !u.contains("/artist//"))?;
+                        Some(PhotoChoice { name: a["name"].as_str()?.to_string(), fans: a["nb_fan"].as_u64().unwrap_or(0), thumb: a["picture_medium"].as_str().unwrap_or(full).to_string(), full: full.to_string() })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let pages = async {
+        let Some(v) = get_json(http, &format!("https://en.wikipedia.org/w/rest.php/v1/search/page?q={q}&limit=8")).await else { return Vec::new() };
+        v["pages"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|p| {
+                        let description = p["description"].as_str().unwrap_or_default().to_string();
+                        Some(PageChoice { key: p["key"].as_str()?.to_string(), title: p["title"].as_str()?.to_string(), music: is_music_description(&description), description })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    tokio::join!(photos, pages)
+}
+
+pub fn allowed_photo(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some_and(|h| h.ends_with(".dzcdn.net")))
+}
+
+pub async fn chosen(http: &reqwest::Client, photo: Option<&str>, page: Option<&str>) -> Found {
+    let mut found = Found::default();
+    if let Some(url) = photo.filter(|u| allowed_photo(u)) {
+        found.photo = get_bytes(http, url).await;
+    }
+    if let Some(key) = page.filter(|k| !k.is_empty() && k.len() < 300 && !k.contains('/')) {
+        if let Some(s) = get_json(http, &format!("https://en.wikipedia.org/api/rest_v1/page/summary/{}", path_enc(key))).await {
+            if s["type"].as_str() == Some("standard") {
+                found.bio = s["extract"].as_str().map(|t| t.trim().to_string());
+                found.bio_source = s["content_urls"]["desktop"]["page"].as_str().map(String::from);
+                if let Some(q) = s["wikibase_item"].as_str() {
+                    found.logo = wikidata_file(http, q, "P154").await;
+                    if found.photo.is_none() && photo.is_none() {
+                        found.photo = wikidata_file(http, q, "P18").await;
+                    }
+                }
+            }
+        }
+    }
+    found
+}
+
 pub async fn find(http: &reqwest::Client, name: &str, want_photo: bool, want_bio: bool, want_logo: bool) -> Result<Found> {
     let mut found = Found::default();
     let photo = async {
@@ -153,6 +230,10 @@ mod tests {
         assert_eq!(norm("Kühvt!"), "kühvt");
         assert_eq!(path_enc("Daft Punk logo.svg"), "Daft_Punk_logo.svg");
         assert_eq!(path_enc("Beyoncé"), "Beyonc%C3%A9");
+        assert!(allowed_photo("https://cdn-images.dzcdn.net/images/artist/abc/1000x1000.jpg"));
+        assert!(!allowed_photo("http://cdn-images.dzcdn.net/x.jpg"));
+        assert!(!allowed_photo("https://evil.example/dzcdn.net.jpg"));
+        assert!(!allowed_photo("file:///C:/Windows/win.ini"));
     }
 
     #[tokio::test]

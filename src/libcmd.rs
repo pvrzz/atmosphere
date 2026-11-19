@@ -707,3 +707,25 @@ pub async fn import_file(app: AppHandle, state: State<'_, AppState>, request: ta
     changed(&app);
     Ok(track)
 }
+
+#[tauri::command]
+pub async fn artist_choices(state: State<'_, AppState>, query: String) -> CmdResult<serde_json::Value> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(serde_json::json!({ "photos": [], "pages": [] }));
+    }
+    let (photos, pages) = crate::artistinfo::choices(&state.http, q).await;
+    Ok(serde_json::json!({ "photos": photos, "pages": pages }))
+}
+
+#[tauri::command]
+pub async fn artist_apply(state: State<'_, AppState>, name: String, photo: Option<String>, page: Option<String>) -> CmdResult<crate::library::ArtistMeta> {
+    if photo.as_deref().is_some_and(|u| !crate::artistinfo::allowed_photo(u)) {
+        return Err("That photo isn't from a source Atmosphere trusts.".into());
+    }
+    let found = crate::artistinfo::chosen(&state.http, photo.as_deref(), page.as_deref()).await;
+    if found.photo.is_none() && found.bio.is_none() && found.logo.is_none() {
+        return Err("Couldn't get anything from that choice. Try another one.".into());
+    }
+    Ok(state.library.apply_artist_info(&name, found, true))
+}

@@ -552,6 +552,8 @@ fn main() {
             libcmd::import_file,
             libcmd::artist_fetch,
             libcmd::artist_media,
+            libcmd::artist_choices,
+            libcmd::artist_apply,
             libcmd::playlist_cover,
             libcmd::playlist_relocate,
             libcmd::playlist_unlink
