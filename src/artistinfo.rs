@@ -1,5 +1,6 @@
 // atmosphere · artistinfo.rs · Finds artist photos, bios and logos from keyless public sources: Deezer, Wikipedia and Wikidata
 use anyhow::Result;
+use base64::Engine as _;
 use regex::Regex;
 use serde_json::Value;
 use std::sync::LazyLock;
@@ -150,7 +151,13 @@ pub async fn choices(http: &reqwest::Client, query: &str) -> (Vec<PhotoChoice>, 
             })
             .unwrap_or_default()
     };
-    tokio::join!(photos, pages)
+    let (mut photos, pages) = tokio::join!(photos, pages);
+    let thumbs = futures_util::future::join_all(photos.iter().map(|p| get_bytes(http, &p.thumb))).await;
+    for (p, bytes) in photos.iter_mut().zip(thumbs) {
+        p.thumb = bytes.map(|b| format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b))).unwrap_or_default();
+    }
+    photos.retain(|p| !p.thumb.is_empty());
+    (photos, pages)
 }
 
 pub fn allowed_photo(url: &str) -> bool {
@@ -234,6 +241,18 @@ mod tests {
         assert!(!allowed_photo("http://cdn-images.dzcdn.net/x.jpg"));
         assert!(!allowed_photo("https://evil.example/dzcdn.net.jpg"));
         assert!(!allowed_photo("file:///C:/Windows/win.ini"));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_choices_include_photos() {
+        let http = reqwest::Client::builder().user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION"))).build().unwrap();
+        for q in ["Daft Punk", "Drake", "Taylor Swift", "Westwood"] {
+            let (photos, pages) = choices(&http, q).await;
+            eprintln!("{q}: {} photos, {} pages", photos.len(), pages.len());
+            assert!(!photos.is_empty(), "no photos for {q}");
+            assert!(photos.iter().all(|p| p.thumb.starts_with("data:image/jpeg;base64,") && p.full.starts_with("https://")));
+        }
     }
 
     #[tokio::test]

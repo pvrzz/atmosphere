@@ -130,10 +130,10 @@ async function loadLibrary() {
   if (typeof updateCommit === "function") updateCommit();
 }
 
-const artistImage = (ar) => ar?.meta?.image || ar?.albums.find((a) => a.art)?.art || ar?.tracks.find((t) => t.art)?.art || null;
+const artistImage = (ar) => ar?.meta?.image || null;
 
-function cover(key, cls, alt = "") {
-  return art(artUrl(key), cls, alt);
+function cover(key, cls, alt = "", ph = "music") {
+  return art(artUrl(key), cls, alt, ph);
 }
 
 /* routing */
@@ -668,7 +668,7 @@ async function searchArtistOnline(ar) {
     if (!r) return;
     photos.replaceChildren(...r.photos.map((p) => {
       const el = h("button", { class: "pick-photo", type: "button", title: `${p.name} · ${fans(p.fans)}`, onclick: () => { pick.photo = pick.photo === p.full ? null : p.full; $$(".pick-photo", photos).forEach((x) => x.classList.toggle("on", x === el && !!pick.photo)); } },
-        h("img", { src: p.thumb, alt: "", referrerpolicy: "no-referrer", loading: "lazy" }), h("span", {}, p.name), h("small", {}, fans(p.fans)));
+        h("img", { src: p.thumb, alt: "" }), h("span", {}, p.name), h("small", {}, fans(p.fans)));
       return el;
     }));
     pages.replaceChildren(...r.pages.map((p) => {
@@ -892,7 +892,7 @@ function albumView(root, key) {
 
 function artistCard(ar) {
   return h("div", { class: "card-tile artist", role: "button", tabindex: "0", "data-artist": ar.key, onclick: () => openLib("artist", ar.key), onkeydown: (e) => { if (e.key === "Enter") openLib("artist", ar.key); } },
-    h("div", { class: "tile-art round" }, cover(artistImage(ar), "tile-img", ar.name)),
+    h("div", { class: "tile-art round" }, cover(artistImage(ar), "tile-img", ar.name, "user")),
     h("div", { class: "tile-title" }, ar.name),
     h("div", { class: "tile-sub" }, ar.albums.length ? plural(ar.albums.length, "release") : plural(ar.tracks.length, "song")));
 }
@@ -916,7 +916,7 @@ function artistView(root, key) {
   root.append(
     h("header", { class: "hero artist-hero" },
       h("div", { class: "hero-bg", style: img ? `background-image:url("${artUrl(img)}")` : "" }),
-      cover(img, "avatar", ar.name),
+      cover(img, "avatar", ar.name, "user"),
       h("div", { class: "hero-meta" },
         h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, icon("user"), "Artist")),
         ar.meta?.logo ? h("h1", { class: "hero-title big has-logo" }, h("img", { class: `artist-logo ${ar.meta.logoDark ? "dark" : ""}`, src: artUrl(ar.meta.logo), alt: ar.name })) : h("h1", { class: "hero-title big" }, ar.name),

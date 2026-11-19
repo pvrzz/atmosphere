@@ -155,6 +155,18 @@ function renderLyricsAll() {
   if (typeof Mini !== "undefined" && Mini.on) renderMiniPanel();
 }
 
+function centerLine(el) {
+  let box = el.parentElement;
+  while (box && box !== document.body) {
+    const style = getComputedStyle(box);
+    if (/(auto|scroll)/.test(style.overflowY) && box.scrollHeight > box.clientHeight) break;
+    box = box.parentElement;
+  }
+  if (!box || box === document.body) return;
+  const target = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - (box.clientHeight - el.offsetHeight) / 2;
+  box.scrollTo({ top: Math.max(0, target), behavior: reduced.matches ? "auto" : "smooth" });
+}
+
 function tick() {
   Lyr.raf = 0;
   const visible = !$("#lyricsPanel").hidden || Lyr.tv || (typeof Mini !== "undefined" && Mini.on && Mini.panelShown && Mini.prefs.panel === "lyrics");
@@ -177,7 +189,7 @@ function tick() {
         });
         if (box.classList.contains("depth")) setDepth(box, idx);
         const cur = box.querySelector(".lyr-line.on");
-        if (cur) cur.scrollIntoView({ block: "center", behavior: reduced.matches ? "auto" : "smooth" });
+        if (cur) centerLine(cur);
       }
     }
     const line = l.lines[idx];

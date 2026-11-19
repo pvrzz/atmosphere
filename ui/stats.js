@@ -116,7 +116,7 @@ function statsView(root) {
   const artistRows = a.artists.slice(0, 8).map((e, i) => {
     const ar = Lib.artists.get(e.key);
     return h("div", { class: "rank-row", role: "button", tabindex: "0", onclick: () => ar && openLib("artist", ar.key) },
-      h("span", { class: "rank" }, String(i + 1)), cover(ar ? artistImage(ar) : null, "lt-cover round"),
+      h("span", { class: "rank" }, String(i + 1)), cover(ar ? artistImage(ar) : null, "lt-cover round", "", "user"),
       h("div", { class: "lt-main" }, h("span", { class: "lt-title" }, e.name), h("span", { class: "lt-sub" }, `${plural(e.plays, "play")} · ${fmtHours(e.ms)}`)));
   });
   body.append(h("div", { class: "stat-split" },

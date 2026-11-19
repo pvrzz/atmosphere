@@ -12,7 +12,7 @@ const Mini = {
 
 const MINI_MIN = { w: 260, h: 96 };
 const MINI_MAX = { w: 900, h: 900 };
-const MINI_CORE = 168;
+const MINI_CORE = 196;
 const MINI_STRIP = 112;
 const MINI_PANEL = 232;
 

@@ -95,10 +95,10 @@ function toast(message, kind = "") {
   }, kind === "err" ? 6500 : 3000);
 }
 
-function art(url, cls, alt = "") {
-  if (!url) return h("div", { class: `${cls} ph` }, icon("music"));
+function art(url, cls, alt = "", ph = "music") {
+  if (!url) return h("div", { class: `${cls} ph` }, icon(ph));
   const img = h("img", { class: cls, src: url, alt, loading: "lazy", draggable: "false", referrerpolicy: "no-referrer" });
-  img.addEventListener("error", () => img.replaceWith(h("div", { class: `${cls} ph` }, icon("music"))), { once: true });
+  img.addEventListener("error", () => img.replaceWith(h("div", { class: `${cls} ph` }, icon(ph))), { once: true });
   return img;
 }
 

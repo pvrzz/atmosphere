@@ -1183,3 +1183,11 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 .keep-audio { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s3); align-items: start; margin-top: var(--s3); cursor: pointer; }
 .keep-audio span { display: grid; gap: 2px; }
 .keep-audio small { color: var(--text-3); font-size: 11.5px; line-height: 1.4; }
+
+/* mini player: the cover gives way first, the controls never do */
+.mini.portrait .mini-body { flex: 0 1 auto; min-height: 0; }
+.mini.portrait .mini-art { flex: 0 1 auto; min-height: 0; width: auto; aspect-ratio: 1; max-width: calc(100% - 40px); }
+.mini.portrait .mini-art img, .mini.portrait .mini-art-empty { width: 100%; height: 100%; }
+.mini .mini-info, .mini .mini-ctl, .mini .mini-top { flex-shrink: 0; }
+.mini.has-panel .mini-panel { min-height: 96px; }
+.mini.tiny.has-panel .mini-panel { display: none; }

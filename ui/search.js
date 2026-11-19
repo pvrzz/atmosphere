@@ -28,7 +28,7 @@ function qsResults(raw) {
   const add = (group, list, n, make) => list.slice(0, n).forEach(([, x], i) => out.push({ group: i === 0 ? group : null, ...make(x) }));
   const songItem = (t) => ({ kind: "song", title: t.title, sub: [t.artist, t.album].filter(Boolean).join(" · "), art: t.art, run: () => playList([t]), alt: () => Player.playNext([t]) });
   const albumItem = (a) => ({ kind: "album", title: a.title, sub: `${albumKind(a)} · ${a.artist}`, art: a.art, run: () => openLib("album", a.key), alt: () => playList(a.tracks) });
-  const artistItem = (a) => ({ kind: "artist", title: a.name, sub: `Artist · ${plural(a.tracks.length, "song")}`, art: a.meta?.image || a.albums[0]?.art, round: true, run: () => openLib("artist", a.key), alt: () => playList(a.tracks, 0, true) });
+  const artistItem = (a) => ({ kind: "artist", title: a.name, sub: `Artist · ${plural(a.tracks.length, "song")}`, art: a.meta?.image || null, icon: "user", round: true, run: () => openLib("artist", a.key), alt: () => playList(a.tracks, 0, true) });
   const listItem = (p) => ({ kind: "playlist", title: p.name, sub: `Playlist · ${plural(p.order.length, "song")}`, icon: p.linked ? "folder" : "playlist", run: () => openLib("playlist", p.name), alt: () => playList(p.order.map((id) => Lib.byId.get(id)).filter(Boolean)) });
   if (top && top[0] >= 60) {
     const x = top[1];
