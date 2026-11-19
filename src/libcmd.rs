@@ -499,6 +499,10 @@ pub fn serve(app: &AppHandle, request: &Request<Vec<u8>>) -> Response<Vec<u8>> {
             None => respond(404, "text/plain", b"unknown track".to_vec(), &[]),
         },
         "a" => match state.library.art_path(id) {
+            Some(p) if p.extension().is_some_and(|e| e == "png") => match std::fs::read(&p) {
+                Ok(data) => respond(200, "image/png", data, &[("Cache-Control", "max-age=86400".into())]),
+                Err(_) => respond(404, "text/plain", Vec::new(), &[]),
+            },
             Some(p) => {
                 let data = std::fs::read(&p).unwrap_or_default();
                 respond(200, "image/jpeg", data, &[("Cache-Control", "max-age=86400".into())])
@@ -612,4 +616,39 @@ pub fn playlist_cover(app: AppHandle, state: State<'_, AppState>, name: String, 
     state.library.playlist_cover(&pl, &name, path.as_deref().map(Path::new)).map_err(err)?;
     changed(&app);
     Ok(())
+}
+
+#[tauri::command]
+pub async fn artist_fetch(state: State<'_, AppState>, name: String, force: bool) -> CmdResult<Option<crate::library::ArtistMeta>> {
+    let s = state.snapshot();
+    if !s.artist_info && !force {
+        return Ok(None);
+    }
+    let existing = state.library.artist(&name).unwrap_or_default();
+    if existing.checked.is_some() && !force {
+        return Ok(Some(existing));
+    }
+    let want_photo = force || existing.image.is_none();
+    let want_bio = force || existing.bio.trim().is_empty();
+    let want_logo = force || existing.logo.is_none();
+    let found = crate::artistinfo::find(&state.http, &name, want_photo, want_bio, want_logo).await.map_err(err)?;
+    Ok(Some(state.library.apply_artist_info(&name, found, force)))
+}
+
+#[tauri::command]
+pub async fn artist_media(app: AppHandle, state: State<'_, AppState>, name: String, kind: String, pick: bool) -> CmdResult<crate::library::ArtistMeta> {
+    let image = if pick {
+        let a = app.clone();
+        let title = if kind == "logo" { "Choose a logo (a transparent PNG looks best)" } else { "Choose an image" };
+        let picked = tauri::async_runtime::spawn_blocking(move || a.dialog().file().set_title(title).add_filter("Images", &["png", "jpg", "jpeg", "webp"]).blocking_pick_file())
+            .await
+            .map_err(|e| e.to_string())?;
+        match picked.and_then(|p| p.into_path().ok()) {
+            Some(p) => Some(p),
+            None => return Err("cancelled".into()),
+        }
+    } else {
+        None
+    };
+    state.library.artist_media(&name, &kind, image.as_deref()).map_err(err)
 }

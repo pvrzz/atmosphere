@@ -62,6 +62,7 @@ pub struct Settings {
     pub cookies_file: String,
     pub api_enabled: bool,
     pub check_updates: bool,
+    pub artist_info: bool,
     pub api_port: u16,
     pub api_read: bool,
     pub api_control: bool,
@@ -108,6 +109,7 @@ impl Default for Settings {
             cookies_file: String::new(),
             api_enabled: false,
             check_updates: true,
+            artist_info: true,
             api_port: 47823,
             api_read: true,
             api_control: true,
@@ -152,6 +154,7 @@ pub struct SettingsPatch {
     pub cookies_file: Option<String>,
     pub api_enabled: Option<bool>,
     pub check_updates: Option<bool>,
+    pub artist_info: Option<bool>,
     pub api_port: Option<u16>,
     pub api_read: Option<bool>,
     pub api_control: Option<bool>,
@@ -204,7 +207,7 @@ impl Settings {
             ($($f:ident),*) => { $( if let Some(v) = p.$f { self.$f = v; } )* };
         }
         set!(save_as, embed_metadata, collection_folders, number_tracks, skip_downloaded, sponsorblock, embed_subtitles, embed_chapters, watch_clipboard);
-        set!(api_enabled, api_read, api_control, api_links, check_updates);
+        set!(api_enabled, api_read, api_control, api_links, check_updates, artist_info);
         if let Some(p) = p.api_port.filter(|p| *p >= 1024) {
             self.api_port = p;
         }

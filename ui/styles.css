@@ -1118,3 +1118,14 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 .edit-cover-ph { width: 100%; height: 100%; display: grid; place-items: center; color: var(--text-3); }
 .edit-cover-ph .i svg { width: 32px; height: 32px; }
 .fields input::placeholder { color: var(--text-3); font-size: 12px; }
+
+/* artist logos and sources */
+.hero-title.has-logo { line-height: 0; }
+.artist-logo { display: block; max-height: 96px; max-width: min(460px, 100%); object-fit: contain; object-position: left center; filter: drop-shadow(0 4px 18px rgba(0, 0, 0, 0.35)); }
+.artist-logo.dark { filter: invert(1) drop-shadow(0 4px 18px rgba(0, 0, 0, 0.35)); }
+.edit-logo { min-height: 56px; padding: 10px 14px; border-radius: 10px; background: #12141b; border: 1px solid var(--hairline); display: flex; align-items: center; }
+.edit-logo .artist-logo { max-height: 48px; }
+.edit-cover.round { border-radius: 50%; }
+.about .source { margin-top: var(--s2); font-size: 12px; }
+.row.between { justify-content: space-between; align-items: center; gap: var(--s3); }
+.row.between p { margin: 0; flex: 1; }

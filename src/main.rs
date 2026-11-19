@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod api;
+mod artistinfo;
 mod backup;
 mod direct;
 mod downloader;
@@ -534,6 +535,8 @@ fn main() {
             libcmd::playlist_link,
             libcmd::track_loudness,
             libcmd::tracks_edit,
+            libcmd::artist_fetch,
+            libcmd::artist_media,
             libcmd::playlist_cover,
             libcmd::playlist_relocate,
             libcmd::playlist_unlink

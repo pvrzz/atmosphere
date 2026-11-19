@@ -73,6 +73,31 @@ pub struct ArtistMeta {
     pub name: String,
     pub image: Option<String>,
     pub bio: String,
+    pub bio_source: Option<String>,
+    pub logo: Option<String>,
+    pub logo_dark: bool,
+    pub checked: Option<u64>,
+}
+
+fn save_logo(key: &str, data: &[u8]) -> Option<(String, bool)> {
+    let dir = art_dir();
+    std::fs::create_dir_all(&dir).ok()?;
+    let img = image::load_from_memory(data).ok()?;
+    let img = if img.width() > 800 { img.thumbnail(800, 400) } else { img };
+    let rgba = img.to_rgba8();
+    let (mut sum, mut n) = (0f64, 0f64);
+    for p in rgba.pixels() {
+        let a = p[3] as f64 / 255.0;
+        if a > 0.3 {
+            sum += (0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64) / 255.0 * a;
+            n += a;
+        }
+    }
+    let dark = n > 0.0 && sum / n < 0.35;
+    let mut buf = std::io::Cursor::new(Vec::new());
+    rgba.write_to(&mut buf, image::ImageFormat::Png).ok()?;
+    std::fs::write(dir.join(format!("{key}.png")), buf.into_inner()).ok()?;
+    Some((key.to_string(), dark))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -284,8 +309,7 @@ impl Library {
 
     pub fn art_path(&self, key: &str) -> Option<PathBuf> {
         let safe: String = key.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
-        let p = art_dir().join(format!("{safe}.jpg"));
-        p.exists().then_some(p)
+        ["jpg", "png"].iter().map(|ext| art_dir().join(format!("{safe}.{ext}"))).find(|p| p.exists())
     }
 
     pub fn scan(&self, roots: &[PathBuf], playlists_dir: &Path, mut progress: impl FnMut(usize, usize)) -> Result<usize> {
@@ -800,7 +824,71 @@ impl Library {
             meta.image = Some(save_art(&id, &data).ok_or_else(|| anyhow!("That image couldn't be read"))?);
         }
         if let Some(b) = bio {
+            if b.trim() != meta.bio.trim() {
+                meta.bio_source = None;
+            }
             meta.bio = b;
+        }
+        let out = meta.clone();
+        store("artists.json", &*artists);
+        Ok(out)
+    }
+
+    pub fn artist(&self, name: &str) -> Option<ArtistMeta> {
+        self.artists.read().unwrap().get(&artist_key(name)).cloned()
+    }
+
+    pub fn apply_artist_info(&self, name: &str, found: crate::artistinfo::Found, force: bool) -> ArtistMeta {
+        let key = artist_key(name);
+        let mut artists = self.artists.write().unwrap();
+        let meta = artists.entry(key.clone()).or_default();
+        meta.name = name.trim().to_string();
+        if let Some(photo) = found.photo.filter(|_| force || meta.image.is_none()) {
+            let id = format!("artistweb{key}");
+            let _ = std::fs::remove_file(art_dir().join(format!("{id}.jpg")));
+            if let Some(k) = save_art(&id, &photo) {
+                meta.image = Some(k);
+            }
+        }
+        if let Some(bio) = found.bio.filter(|_| force || meta.bio.trim().is_empty()) {
+            meta.bio = bio;
+            meta.bio_source = found.bio_source;
+        }
+        if let Some(logo) = found.logo.filter(|_| force || meta.logo.is_none()) {
+            if let Some((k, dark)) = save_logo(&format!("logo{key}"), &logo) {
+                meta.logo = Some(k);
+                meta.logo_dark = dark;
+            }
+        }
+        meta.checked = Some(now());
+        let out = meta.clone();
+        store("artists.json", &*artists);
+        out
+    }
+
+    pub fn artist_media(&self, name: &str, kind: &str, image: Option<&Path>) -> Result<ArtistMeta> {
+        let key = artist_key(name);
+        let mut artists = self.artists.write().unwrap();
+        let meta = artists.entry(key.clone()).or_default();
+        meta.name = name.trim().to_string();
+        meta.checked.get_or_insert(now());
+        match (kind, image) {
+            ("photo", None) => meta.image = None,
+            ("logo", None) => {
+                meta.logo = None;
+                meta.logo_dark = false;
+            }
+            ("bio", None) => {
+                meta.bio.clear();
+                meta.bio_source = None;
+            }
+            ("logo", Some(src)) => {
+                let data = std::fs::read(src).context("Couldn't read that image")?;
+                let (k, dark) = save_logo(&format!("logouser{key}"), &data).ok_or_else(|| anyhow!("That image couldn't be read"))?;
+                meta.logo = Some(k);
+                meta.logo_dark = dark;
+            }
+            _ => bail!("Unknown artist field"),
         }
         let out = meta.clone();
         store("artists.json", &*artists);

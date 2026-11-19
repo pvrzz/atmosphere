@@ -120,6 +120,7 @@ async function loadLibrary() {
   if (!Lib.restored) {
     Lib.restored = true;
     Player.restore((id) => Lib.byId.get(id));
+    setTimeout(queueLibraryArtists, 4000);
     if (state.view === "get" && !state.collections.length) openLib("home", null, false);
   } else {
     Player.refreshTracks((id) => Lib.byId.get(id) || null);
@@ -614,11 +615,106 @@ async function editInfo(t) {
   }
 }
 
+const ArtistFetch = { queue: [], busy: false, asked: new Set() };
+
+function setArtistMeta(name, meta) {
+  if (!meta) return;
+  const ar = Lib.artists.get(lnorm(name));
+  if (ar) ar.meta = meta;
+  if (Lib.data) Lib.data.artists = { ...(Lib.data.artists || {}), [`n:${lnorm(name)}`]: meta };
+  const r = Lib.route;
+  if (state.view === "library" && ((r.name === "artist" && r.id === lnorm(name)) || r.name === "artists" || r.name === "home")) renderLib(true);
+}
+
+async function pumpArtistInfo() {
+  if (ArtistFetch.busy || state.settings?.artistInfo === false) return;
+  const name = ArtistFetch.queue.shift();
+  if (!name) return;
+  ArtistFetch.busy = true;
+  try {
+    setArtistMeta(name, await invoke("artist_fetch", { name, force: false }));
+  } catch {}
+  ArtistFetch.busy = false;
+  if (ArtistFetch.queue.length) setTimeout(pumpArtistInfo, 1200);
+}
+
+function queueArtistInfo(names, first = false) {
+  for (const n of names) {
+    const k = lnorm(n);
+    if (!k || k === "unknown artist" || ArtistFetch.asked.has(k)) continue;
+    ArtistFetch.asked.add(k);
+    first ? ArtistFetch.queue.unshift(n) : ArtistFetch.queue.push(n);
+  }
+  pumpArtistInfo();
+}
+
+function queueLibraryArtists() {
+  const pending = [...Lib.artists.values()].filter((a) => !a.meta?.checked).sort((a, b) => b.tracks.length - a.tracks.length).slice(0, 300);
+  queueArtistInfo(pending.map((a) => a.name));
+}
+
 async function editArtist(ar) {
-  const bio = h("textarea", { class: "text area", rows: "6", placeholder: "A few lines about this artist…" }, ar.meta?.bio || "");
-  const pic = h("div", { class: "row" }, cover(artistImage(ar), "avatar sm"), h("button", { class: "btn", onclick: async () => { try { await invoke("artist_update", { name: ar.name, pickImage: true, bio: null }); toast("Artist image updated", "ok"); } catch (e) { if (errText(e) !== "cancelled") toast(errText(e), "err"); } } }, "Choose image…"));
-  const ok = await modal(`Edit ${ar.name}`, h("div", { class: "stack" }, pic, h("label", { class: "field" }, h("span", {}, "About"), bio)), [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
-  if (ok) await invoke("artist_update", { name: ar.name, pickImage: false, bio: bio.value }).catch((e) => toast(errText(e), "err"));
+  let meta = ar.meta || {};
+  const bio = h("textarea", { class: "text area", rows: "6", placeholder: "A few lines about this artist…" }, meta.bio || "");
+  const photo = h("div", { class: "edit-cover round" });
+  const logo = h("div", { class: "edit-logo" });
+  const draw = () => {
+    photo.replaceChildren(artistImage({ ...ar, meta }) ? h("img", { src: artUrl(artistImage({ ...ar, meta })), alt: "" }) : h("div", { class: "edit-cover-ph" }, icon("user")));
+    logo.replaceChildren(meta.logo ? h("img", { class: `artist-logo ${meta.logoDark ? "dark" : ""}`, src: artUrl(meta.logo), alt: "" }) : h("span", { class: "muted small" }, "No logo. The name is shown as text."));
+  };
+  const act = (kind, pick) => async () => {
+    try {
+      meta = await invoke("artist_media", { name: ar.name, kind, pick });
+      setArtistMeta(ar.name, meta);
+      draw();
+    } catch (e) {
+      if (errText(e) !== "cancelled") toast(errText(e), "err");
+    }
+  };
+  const pickPhoto = async () => {
+    try {
+      meta = await invoke("artist_update", { name: ar.name, pickImage: true, bio: null });
+      setArtistMeta(ar.name, meta);
+      draw();
+    } catch (e) {
+      if (errText(e) !== "cancelled") toast(errText(e), "err");
+    }
+  };
+  const refresh = h("button", { class: "btn small ghost", type: "button", onclick: async (e) => {
+    const b = e.currentTarget;
+    b.disabled = true;
+    b.textContent = "Looking it up…";
+    try {
+      const m = await invoke("artist_fetch", { name: ar.name, force: true });
+      if (m) {
+        meta = m;
+        bio.value = m.bio || "";
+        setArtistMeta(ar.name, m);
+        draw();
+        toast(m.image || m.bio || m.logo ? "Updated from Deezer and Wikipedia" : "Nothing found online for this name", m.image || m.bio || m.logo ? "ok" : "");
+      }
+    } catch (x) {
+      toast(errText(x), "err");
+    }
+    b.disabled = false;
+    b.textContent = "Look up online again";
+  } }, "Look up online again");
+  draw();
+  const body = h("div", { class: "stack" },
+    h("div", { class: "edit-cover-row" }, photo, h("div", { class: "stack" }, h("strong", {}, "Photo"),
+      h("div", { class: "row" }, h("button", { class: "btn small", type: "button", onclick: pickPhoto }, "Choose image…"), h("button", { class: "btn small ghost", type: "button", onclick: act("photo", false) }, "Remove")))),
+    h("div", { class: "stack" }, h("strong", {}, "Logo"), logo,
+      h("div", { class: "row" }, h("button", { class: "btn small", type: "button", onclick: act("logo", true) }, "Choose logo…"), h("button", { class: "btn small ghost", type: "button", onclick: act("logo", false) }, "Remove"))),
+    h("label", { class: "field" }, h("span", {}, "About"), bio),
+    h("div", { class: "row between" }, h("p", { class: "muted small" }, "Photos come from Deezer and bios and logos from Wikipedia, when found. Anything you change here stays."), refresh));
+  const ok = await modal(`Edit ${ar.name}`, body, [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
+  if (ok && bio.value !== (meta.bio || "")) {
+    try {
+      setArtistMeta(ar.name, await invoke("artist_update", { name: ar.name, pickImage: false, bio: bio.value }));
+    } catch (e) {
+      toast(errText(e), "err");
+    }
+  }
 }
 
 /* views */
@@ -770,7 +866,7 @@ function artistView(root, key) {
       cover(img, "avatar", ar.name),
       h("div", { class: "hero-meta" },
         h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, icon("user"), "Artist")),
-        h("h1", { class: "hero-title big" }, ar.name),
+        ar.meta?.logo ? h("h1", { class: "hero-title big has-logo" }, h("img", { class: `artist-logo ${ar.meta.logoDark ? "dark" : ""}`, src: artUrl(ar.meta.logo), alt: ar.name })) : h("h1", { class: "hero-title big" }, ar.name),
         h("p", { class: "view-sub" }, [plural(ar.tracks.length, "song"), ar.albums.length && plural(ar.albums.length, "release"), plays && plural(plays, "play")].filter(Boolean).join(" · ")),
         h("div", { class: "row" }, ...playBtns(ar.tracks), h("button", { class: "btn ghost", onclick: () => editArtist(ar) }, icon("pencil"), "Edit profile"))))
   );
@@ -780,7 +876,10 @@ function artistView(root, key) {
   if (full.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Albums"), h("div", { class: "grid" }, ...full.map(albumCard))));
   if (small.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Singles & EPs"), h("div", { class: "grid" }, ...small.map(albumCard))));
   if (ar.featured.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Featured on"), h("div", { class: "grid" }, ...ar.featured.map(featuredCard))));
-  body.append(h("section", { class: "about" }, h("h2", { class: "sec" }, "About"), ar.meta?.bio ? h("p", { class: "bio" }, ar.meta.bio) : h("button", { class: "link muted", onclick: () => editArtist(ar) }, "Add a bio and photo for this artist")));
+  body.append(h("section", { class: "about" }, h("h2", { class: "sec" }, "About"),
+    ar.meta?.bio ? h("p", { class: "bio" }, ar.meta.bio) : h("button", { class: "link muted", onclick: () => editArtist(ar) }, "Add a bio and photo for this artist"),
+    ar.meta?.bio && ar.meta?.bioSource ? h("button", { class: "link muted small source", onclick: () => invoke("open_link", { url: ar.meta.bioSource }).catch(() => {}) }, "From Wikipedia, under CC BY-SA") : null));
+  if (!ar.meta?.checked) queueArtistInfo([ar.name], true);
   root.append(body);
 }
 
