@@ -533,6 +533,8 @@ fn main() {
             libcmd::set_fullscreen,
             libcmd::playlist_link,
             libcmd::track_loudness,
+            libcmd::tracks_edit,
+            libcmd::playlist_cover,
             libcmd::playlist_relocate,
             libcmd::playlist_unlink
         ])

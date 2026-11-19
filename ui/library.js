@@ -345,6 +345,7 @@ function trackMenu(e, t, ctx, i) {
       { label: "Add to queue", run: () => Player.addToQueue(many) },
       "-",
       { label: "Add to playlist", sub: playlistItems(many) },
+      { label: `Edit info for ${many.length} songs…`, run: () => editTracks(many) },
       inList.length ? { label: `Remove ${inList.length} from this playlist`, run: () => removeFromPlaylist(ctx.playlist, inList) } : null,
       "-",
       { label: `Remove ${many.length} from library`, run: () => hideTracks(many) },
@@ -515,6 +516,88 @@ async function newPlaylist(tracks = []) {
   }
 }
 
+function shared(tracks, get) {
+  const vals = new Set(tracks.map((t) => String(get(t) ?? "").trim()));
+  return vals.size === 1 ? [...vals][0] : "";
+}
+
+async function editTracks(tracks, opts = {}) {
+  if (!tracks.length) return;
+  const title = opts.title || `Edit ${plural(tracks.length, "song")}`;
+  const fields = [
+    ["album", "Album", shared(tracks, (t) => t.album)],
+    ["albumArtist", "Album artist", shared(tracks, (t) => t.albumArtist || (opts.album ? opts.album.artist : ""))],
+    ["artist", "Artist", opts.album ? "" : shared(tracks, (t) => t.artist)],
+    ["date", "Year", shared(tracks, (t) => t.year)],
+    ["genre", "Genre", shared(tracks, (t) => t.genre)],
+  ].filter(([k]) => !(opts.album && k === "artist"));
+  const inputs = {};
+  const grid = h("div", { class: "fields two" }, ...fields.map(([k, label, v]) => h("label", { class: `field ${k === "album" ? "full" : ""}` }, h("span", {}, label), (inputs[k] = h("input", { value: v, placeholder: v ? "" : "Mixed: leave blank to keep each song's own", spellcheck: "false" })))));
+  let artwork = { kind: "keep" };
+  const currentArt = shared(tracks, (t) => t.art);
+  const preview = h("div", { class: "edit-cover" });
+  const showPreview = (src) => preview.replaceChildren(src ? h("img", { src, alt: "" }) : h("div", { class: "edit-cover-ph" }, icon("photo")));
+  showPreview(currentArt ? artUrl(currentArt) : null);
+  const coverNote = h("p", { class: "muted small" }, currentArt ? "Current cover." : tracks.some((t) => t.art) ? "These songs have different covers." : "No cover yet.");
+  const coverBox = h("div", { class: "edit-cover-row" }, preview, h("div", { class: "stack" },
+    h("strong", {}, "Cover art"), coverNote,
+    h("div", { class: "row" },
+      h("button", { class: "btn small", type: "button", onclick: async () => { const p = await invoke("pick_image").catch((x) => (toast(errText(x), "err"), null)); if (p) { artwork = { kind: "file", path: p.path }; showPreview(p.dataUrl); coverNote.textContent = `New cover for all ${plural(tracks.length, "song")}.`; } } }, "Choose image…"),
+      h("button", { class: "btn small ghost", type: "button", onclick: () => { artwork = { kind: "none" }; showPreview(null); coverNote.textContent = "The cover will be removed from every song."; } }, "Remove"))));
+  const ok = await modal(title, h("div", { class: "stack" }, coverBox, grid, h("p", { class: "muted small" }, "Changes are written into each file's tags. Fields you leave untouched aren't changed.")), [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
+  if (!ok) return;
+  const meta = { artwork };
+  for (const [k, , v] of fields) {
+    const nv = inputs[k].value.trim();
+    if (nv && nv !== v) meta[k] = nv;
+  }
+  if (Object.keys(meta).length === 1 && artwork.kind === "keep") return;
+  toast(`Updating ${plural(tracks.length, "song")}…`, "");
+  try {
+    const n = await invoke("tracks_edit", { ids: tracks.map((t) => t.id), meta });
+    toast(`Updated ${plural(n, "song")}`, "ok");
+    await loadLibrary();
+    if (opts.album) {
+      const artist = meta.albumArtist || opts.album.artist;
+      const key = `${lnorm(artist)}|${lnorm(meta.album || opts.album.title)}`;
+      if (Lib.albums.has(key)) openLib("album", key, false);
+    }
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
+const kindWord = (a) => (albumKind(a) === "EP" ? "EP" : albumKind(a).toLowerCase());
+const editAlbum = (a) => editTracks(a.tracks, { album: a, title: `Edit ${kindWord(a)}` });
+
+async function editPlaylist(p) {
+  const input = h("input", { class: "text wide", value: p.name, "aria-label": "Playlist name", spellcheck: "false" });
+  let cover = null;
+  const preview = h("div", { class: "edit-cover" });
+  const tracks = p.order.map((id) => Lib.byId.get(id)).filter(Boolean);
+  const showPreview = (src) => preview.replaceChildren(src ? h("img", { src, alt: "" }) : h("div", { class: "edit-cover-ph" }, icon("playlist")));
+  showPreview(p.cover ? artUrl(p.cover) : tracks[0]?.art ? artUrl(tracks[0].art) : null);
+  const note = h("p", { class: "muted small" }, p.cover ? "Saved as cover.jpg in the playlist folder." : "Uses the songs' covers until you choose one.");
+  const body = h("div", { class: "stack" },
+    h("label", { class: "field full" }, h("span", {}, "Name"), input),
+    h("div", { class: "edit-cover-row" }, preview, h("div", { class: "stack" }, h("strong", {}, "Playlist cover"), note,
+      h("div", { class: "row" },
+        h("button", { class: "btn small", type: "button", onclick: async () => { const x = await invoke("pick_image").catch((e) => (toast(errText(e), "err"), null)); if (x) { cover = { path: x.path }; showPreview(x.dataUrl); note.textContent = "Saved as cover.jpg in the folder, so phones and other players show it too."; } } }, "Choose image…"),
+        p.cover ? h("button", { class: "btn small ghost", type: "button", onclick: () => { cover = { path: null }; showPreview(tracks[0]?.art ? artUrl(tracks[0].art) : null); note.textContent = "The cover image will go to the Recycle Bin."; } }, "Remove") : null))));
+  const ok = await modal(p.linked ? "Edit linked folder" : "Edit playlist", body, [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
+  if (!ok) return;
+  let name = p.name;
+  try {
+    const want = input.value.trim();
+    if (want && want !== p.name) name = await invoke("playlist_rename", { from: p.name, to: want });
+    if (cover) await invoke("playlist_cover", { name, path: cover.path });
+    await loadLibrary();
+    openLib("playlist", name, false);
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
 async function editInfo(t) {
   const fields = [["title", "Title", t.title], ["artist", "Artist", t.artist], ["album", "Album", t.album], ["albumArtist", "Album artist", t.albumArtist], ["trackNumber", "Track", t.trackNo ?? ""], ["discNumber", "Disc", t.discNo ?? ""], ["date", "Year", t.year ?? ""], ["genre", "Genre", t.genre]];
   const inputs = {};
@@ -645,7 +728,7 @@ function albumView(root, key) {
         h("h1", { class: "hero-title" }, a.title),
         h("button", { class: "link hero-artist", onclick: () => openLib("artist", lnorm(a.artist)) }, a.artist),
         h("p", { class: "view-sub" }, `${plural(a.tracks.length, "song")} · ${fmtLong(a.duration)}`),
-        h("div", { class: "row" }, ...playBtns(a.tracks), h("button", { class: "btn ghost", onclick: (e) => menuAt(e.clientX, e.clientY, playlistItems(a.tracks)()) }, icon("playlist-add"), "Add to playlist"))))
+        h("div", { class: "row" }, ...playBtns(a.tracks), h("button", { class: "btn ghost", onclick: (e) => menuAt(e.clientX, e.clientY, playlistItems(a.tracks)()) }, icon("playlist-add"), "Add to playlist"), h("button", { class: "btn ghost", onclick: () => editAlbum(a) }, icon("pencil"), "Edit"))))
   );
   if (Lib.back.length) root.firstChild.prepend(h("button", { class: "icon-btn back on-hero", "aria-label": "Back", onclick: libBack }, icon("arrow-left")));
   const ctx = { hideAlbum: true, hideArtist: !multiArtist, showArtistFor: (t) => lnorm(primaryArtist(t.artist)) !== lnorm(a.artist), numbers: (t, i) => t.trackNo || i + 1 };
@@ -741,7 +824,7 @@ function playlistView(root, name) {
   root.append(
     h("header", { class: "hero" },
       h("div", { class: "hero-bg", style: tracks[0]?.art ? `background-image:url("${artUrl(tracks[0].art)}")` : "" }),
-      mosaic(tracks),
+      p.cover ? cover(p.cover, "hero-cover", p.name) : mosaic(tracks),
       h("div", { class: "hero-meta" },
         h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, icon(p.linked ? "link" : "folder"), p.linked ? "Your folder" : "Playlist folder")),
         title,
@@ -749,6 +832,7 @@ function playlistView(root, name) {
         h("button", { class: "link path", title: "Open this folder", onclick: () => invoke("reveal", { path: p.path }) }, p.path),
         h("div", { class: "row" }, ...playBtns(tracks),
           h("button", { class: "btn ghost", onclick: async () => { try { const n = await invoke("playlist_add_files", { name: p.name }); if (n) toast(`Added ${plural(n, "song")}`, "ok"); } catch (e) { toast(errText(e), "err"); } } }, icon("plus"), "Add files…"),
+          h("button", { class: "btn ghost", onclick: () => editPlaylist(p) }, icon("pencil"), "Edit"),
           p.linked
             ? h("button", { class: "btn ghost", onclick: () => unlinkFolder(p.name) }, icon("x"), "Remove from Atmosphere")
             : h("button", { class: "btn ghost danger", onclick: async () => { if (await confirmBox(`Delete “${p.name}”?`, "The playlist folder goes to your Recycle Bin or Trash. Songs in your library aren't touched.", "Delete")) { await invoke("playlist_delete", { name: p.name }).catch((e) => toast(errText(e), "err")); openLib("songs", null, false); } } }, icon("trash"), "Delete"))))
@@ -773,7 +857,7 @@ function trackCard(t) {
 function playlistCard(p) {
   const tracks = p.order.map((id) => Lib.byId.get(id)).filter(Boolean);
   const arts = [...new Set(tracks.map((t) => t.art).filter(Boolean))].slice(0, 4);
-  const art = arts.length >= 4 ? h("div", { class: "tile-img tile-mosaic" }, ...arts.map((k) => cover(k, ""))) : arts.length ? cover(arts[0], "tile-img", p.name) : h("div", { class: "tile-img ph" }, icon(p.linked ? "folder" : "playlist"));
+  const art = p.cover ? cover(p.cover, "tile-img", p.name) : arts.length >= 4 ? h("div", { class: "tile-img tile-mosaic" }, ...arts.map((k) => cover(k, ""))) : arts.length ? cover(arts[0], "tile-img", p.name) : h("div", { class: "tile-img ph" }, icon(p.linked ? "folder" : "playlist"));
   return h("div", { class: "card-tile", role: "button", tabindex: "0", "data-playlist": p.name, onclick: () => openLib("playlist", p.name), onkeydown: (e) => { if (e.key === "Enter") openLib("playlist", p.name); } },
     h("div", { class: "tile-art" }, art, tracks.length ? h("button", { class: "tile-play", "aria-label": `Play ${p.name}`, onclick: (e) => { e.stopPropagation(); playList(tracks); } }, icon("player-play-filled")) : null),
     h("div", { class: "tile-title" }, p.name),
@@ -1000,6 +1084,7 @@ function albumMenu(e, a) {
     "-",
     { label: "Add to playlist", sub: playlistItems(a.tracks) },
     { label: "Go to artist", run: () => openLib("artist", lnorm(a.artist)) },
+    { label: `Edit ${kindWord(a)}…`, run: () => editAlbum(a) },
     "-",
     { label: "Remove album from library", run: () => hideTracks(a.tracks) },
     { label: "Delete album from device…", danger: true, run: () => deleteTracks(a.tracks) },
@@ -1015,19 +1100,6 @@ function artistMenu(e, ar) {
     { label: "Open profile", run: () => openLib("artist", ar.key) },
     { label: "Edit profile…", run: () => editArtist(ar) },
   ]);
-}
-
-async function renamePlaylist(name) {
-  const input = h("input", { class: "text wide", value: name, "aria-label": "Playlist name" });
-  const ok = await modal("Rename playlist", input, [{ label: "Cancel", value: false }, { label: "Rename", value: true, primary: true }]);
-  const to = input.value.trim();
-  if (!ok || !to || to === name) return;
-  try {
-    const n = await invoke("playlist_rename", { from: name, to });
-    if (Lib.route.name === "playlist" && Lib.route.id === name) Lib.route = { name: "playlist", id: n };
-  } catch (err) {
-    toast(errText(err), "err");
-  }
 }
 
 function playlistMenu(e, name) {
@@ -1047,7 +1119,7 @@ function playlistMenu(e, name) {
       { label: "Shuffle", disabled: !tracks.length, run: () => playList(tracks, Math.floor(Math.random() * tracks.length), true) },
       "-",
       { label: "Add files…", run: () => invoke("playlist_add_files", { name }).catch((err) => toast(errText(err), "err")) },
-      { label: "Rename in Atmosphere…", run: () => renamePlaylist(name) },
+      { label: "Edit…", run: () => editPlaylist(p) },
       { label: "Show in folder", run: () => invoke("reveal", { path: p.path }) },
       { label: "Locate a different folder…", run: () => relocateFolder(name) },
       "-",
@@ -1059,7 +1131,7 @@ function playlistMenu(e, name) {
     { label: "Shuffle", disabled: !tracks.length, run: () => playList(tracks, Math.floor(Math.random() * tracks.length), true) },
     "-",
     { label: "Add files…", run: () => invoke("playlist_add_files", { name }).catch((err) => toast(errText(err), "err")) },
-    { label: "Rename…", run: () => renamePlaylist(name) },
+    { label: "Edit…", run: () => editPlaylist(p) },
     { label: "Show in folder", run: () => invoke("reveal", { path: p.path }) },
     "-",
     { label: "Delete playlist…", danger: true, run: async () => { if (await confirmBox(`Delete “${name}”?`, "The playlist folder goes to your Recycle Bin or Trash. Songs in your library aren't touched.", "Delete")) invoke("playlist_delete", { name }).catch((err) => toast(errText(err), "err")); } },

@@ -580,3 +580,36 @@ mod loudness_tests {
         assert_eq!(crate::library::parse_gain("-6.20 dB"), Some(-6.2));
     }
 }
+
+#[tauri::command]
+pub async fn tracks_edit(app: AppHandle, state: State<'_, AppState>, ids: Vec<String>, meta: TagFields) -> CmdResult<usize> {
+    let s = state.snapshot();
+    let ffmpeg = crate::engine::locate(&s.ytdlp_path, &s.ffmpeg_path).ok().and_then(|t| t.ffmpeg);
+    let (_, pl) = dirs(&state);
+    let mut done = 0;
+    let mut failed = Vec::new();
+    for (i, id) in ids.iter().enumerate() {
+        let Some(t) = state.library.track(id) else { continue };
+        match tagging::apply(Path::new(&t.path), &meta, "", ffmpeg.as_deref()).await {
+            Ok(()) => {
+                let _ = state.library.refresh(id, &pl);
+                done += 1;
+            }
+            Err(e) => failed.push(format!("{} ({e})", t.title)),
+        }
+        let _ = app.emit(LIBRARY_EVENT, serde_json::json!({ "type": "editing", "done": i + 1, "total": ids.len() }));
+    }
+    changed(&app);
+    if done == 0 && !failed.is_empty() {
+        return Err(format!("Couldn't update {}", failed.join(", ")));
+    }
+    Ok(done)
+}
+
+#[tauri::command]
+pub fn playlist_cover(app: AppHandle, state: State<'_, AppState>, name: String, path: Option<String>) -> CmdResult<()> {
+    let (_, pl) = dirs(&state);
+    state.library.playlist_cover(&pl, &name, path.as_deref().map(Path::new)).map_err(err)?;
+    changed(&app);
+    Ok(())
+}

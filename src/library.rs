@@ -83,6 +83,19 @@ pub struct Playlist {
     pub order: Vec<String>,
     pub linked: bool,
     pub missing: bool,
+    pub cover: Option<String>,
+}
+
+pub const COVER_NAMES: [&str; 4] = ["cover.jpg", "folder.jpg", "cover.png", "folder.png"];
+
+fn folder_cover(folder: &Path) -> Option<String> {
+    let file = COVER_NAMES.iter().map(|n| folder.join(n)).find(|p| p.is_file())?;
+    let (size, mtime) = file_stamp(&file)?;
+    let key = hash(&format!("{}|{size}|{mtime}", file.to_string_lossy()));
+    if art_dir().join(format!("{key}.jpg")).exists() {
+        return Some(key);
+    }
+    save_art(&key, &std::fs::read(&file).ok()?)
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -372,7 +385,8 @@ impl Library {
             let rel = |t: &Track| Path::new(&t.path).strip_prefix(&folder).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
             members.sort_by_key(|t| (order.iter().position(|o| *o == rel(t)).unwrap_or(usize::MAX), rel(t).to_lowercase()));
             let missing = linked && !folder.is_dir();
-            out.push(Playlist { name, path: folder.to_string_lossy().into_owned(), order: members.iter().map(|t| t.id.clone()).collect(), linked, missing });
+            let cover = if missing { None } else { folder_cover(&folder) };
+            out.push(Playlist { name, path: folder.to_string_lossy().into_owned(), order: members.iter().map(|t| t.id.clone()).collect(), linked, missing, cover });
         }
         out.sort_by_key(|p| p.name.to_lowercase());
         out
@@ -791,6 +805,27 @@ impl Library {
         let out = meta.clone();
         store("artists.json", &*artists);
         Ok(out)
+    }
+
+    pub fn playlist_cover(&self, dir: &Path, name: &str, image: Option<&Path>) -> Result<()> {
+        let folder = self.folder(dir, name);
+        if !folder.is_dir() {
+            bail!("That playlist's folder can't be found.");
+        }
+        for n in COVER_NAMES {
+            let p = folder.join(n);
+            if p.is_file() {
+                trash::delete(&p).map_err(|e| anyhow!("Couldn't remove the old cover ({e})"))?;
+            }
+        }
+        if let Some(src) = image {
+            let img = image::open(src).context("That image couldn't be read")?;
+            let img = if img.width() > 1200 || img.height() > 1200 { img.thumbnail(1200, 1200) } else { img };
+            let mut buf = Vec::new();
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, 90).encode_image(&img.to_rgb8()).context("Couldn't save the cover")?;
+            std::fs::write(folder.join("cover.jpg"), buf).context("Couldn't save the cover")?;
+        }
+        Ok(())
     }
 
     pub fn set_gain(&self, id: &str, gain: f32) {
