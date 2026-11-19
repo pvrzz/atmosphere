@@ -115,8 +115,86 @@ function syncFrame() {
 }
 
 /* window chrome */
+const SIDE_KEY = "atmo.sidebar";
+
+function setSidebar(collapsed, save = true) {
+  document.documentElement.classList.toggle("side-collapsed", collapsed);
+  const b = $("#sideToggle");
+  if (b) {
+    b.setAttribute("aria-expanded", String(!collapsed));
+    b.setAttribute("aria-label", collapsed ? "Expand sidebar" : "Collapse sidebar");
+    b.dataset.tip = collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)";
+    b.replaceChildren(icon(collapsed ? "layout-sidebar-left-expand" : "layout-sidebar-left-collapse"));
+  }
+  hideSideTip();
+  if (save) {
+    try {
+      localStorage.setItem(SIDE_KEY, collapsed ? "collapsed" : "open");
+    } catch {}
+  }
+}
+
+function sideTipText(el) {
+  if (el.dataset.tip) return el.dataset.tip;
+  const label = el.querySelector(".nav-label") || [...el.children].find((c) => c.tagName === "SPAN" && !c.classList.contains("i") && !c.classList.contains("nav-ring") && !c.classList.contains("count") && c.textContent.trim());
+  const meta = el.querySelector(".nav-meta")?.textContent.trim();
+  const count = el.querySelector(".count:not([hidden])")?.textContent.trim();
+  const base = (label?.textContent || el.getAttribute("aria-label") || "").trim();
+  return [base, meta === "Missing" ? "folder missing" : meta && el.closest("#playlistNav") ? `${meta} songs` : "", count ? `${count} active` : ""].filter(Boolean).join(" · ");
+}
+
+function showSideTip(el) {
+  const text = sideTipText(el);
+  if (!text) return hideSideTip();
+  let tip = $("#sideTip");
+  if (!tip) {
+    tip = h("div", { class: "side-tip", id: "sideTip", role: "tooltip" });
+    document.body.append(tip);
+  }
+  tip.textContent = text;
+  const r = el.getBoundingClientRect();
+  tip.style.top = `${Math.round(r.top + r.height / 2)}px`;
+  tip.style.left = `${Math.round(r.right + 10)}px`;
+  tip.classList.add("on");
+}
+
+function hideSideTip() {
+  $("#sideTip")?.classList.remove("on");
+}
+
+function bindSidebar() {
+  let collapsed = false;
+  try {
+    collapsed = localStorage.getItem(SIDE_KEY) === "collapsed";
+  } catch {}
+  setSidebar(collapsed, false);
+  const side = $("#sidebar");
+  $("#sideToggle").addEventListener("click", () => setSidebar(!document.documentElement.classList.contains("side-collapsed")));
+  const target = (e) => e.target.closest?.(".nav-item, .update-chip, .engine-state, .side-toggle, #newPlaylistBtn");
+  side.addEventListener("mouseover", (e) => {
+    const el = target(e);
+    if (el && document.documentElement.classList.contains("side-collapsed")) showSideTip(el);
+    else hideSideTip();
+  });
+  side.addEventListener("mouseleave", hideSideTip);
+  side.addEventListener("focusin", (e) => {
+    const el = target(e);
+    if (el && el.matches(":focus-visible") && document.documentElement.classList.contains("side-collapsed")) showSideTip(el);
+  });
+  side.addEventListener("focusout", hideSideTip);
+  side.addEventListener("click", hideSideTip);
+  $("#playlistNav")?.addEventListener("scroll", hideSideTip, { passive: true });
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "b" && !e.target.closest("input, textarea, [contenteditable]")) {
+      e.preventDefault();
+      setSidebar(!document.documentElement.classList.contains("side-collapsed"));
+    }
+  });
+}
+
 function bindWindow() {
   const bar = $("#titlebar");
+  document.documentElement.classList.toggle("mac", isMac);
   if (isMac) bar.classList.add("mac");
   const api = window.__TAURI__.window;
   if (!api?.getCurrentWindow) return;
@@ -145,6 +223,7 @@ async function init() {
   hydrate();
   platformKeys();
   bindWindow();
+  bindSidebar();
   state.settings = await invoke("get_settings");
   applyTheme();
   bindShell();
@@ -272,7 +351,9 @@ function renderEngine() {
   const t = state.tools;
   const foot = $("#engineState");
   const ready = !!t?.ytdlp.path;
-  foot.replaceChildren(h("span", { class: `dot ${ready ? (t.ffmpeg.path ? "ok" : "warn") : "warn"}` }), h("span", {}, ready ? (t.ffmpeg.path ? "Engine ready" : "ffmpeg missing: limited formats") : "Engine not set up"));
+  const engineText = ready ? (t.ffmpeg.path ? "Engine ready" : "ffmpeg missing: limited formats") : "Engine not set up";
+  foot.dataset.tip = engineText;
+  foot.replaceChildren(h("span", { class: `dot ${ready ? (t.ffmpeg.path ? "ok" : "warn") : "warn"}` }), h("span", {}, engineText));
   $("#engineBanner").hidden = ready || !state.settings?.rightsAccepted;
   if (!$("#onboarding").hidden) renderObTools();
   renderToolSettings();

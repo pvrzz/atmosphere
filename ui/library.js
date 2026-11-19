@@ -335,7 +335,7 @@ function renderPlaylistNav() {
   const lists = Lib.data?.playlists || [];
   nav.replaceChildren(
     ...lists.map((p) => {
-      const b = h("button", { class: `nav-item small ${p.missing ? "missing" : ""}`, "data-playlist": p.name, title: p.missing ? `Folder not found: ${p.path}` : p.linked ? p.path : null, onclick: () => openLib("playlist", p.name) }, icon(p.missing ? "alert-circle" : p.linked ? "folder" : "playlist"), h("span", { class: "nav-label" }, p.name), h("span", { class: "nav-meta" }, p.missing ? "Missing" : String(p.order.length)));
+      const b = h("button", { class: `nav-item small ${p.missing ? "missing" : ""}`, "data-playlist": p.name, onclick: () => openLib("playlist", p.name) }, icon(p.missing ? "alert-circle" : p.linked ? "folder" : "playlist"), h("span", { class: "nav-label" }, p.name), h("span", { class: "nav-meta" }, p.missing ? "Missing" : String(p.order.length)));
       b.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("application/x-atmo-tracks")) { e.preventDefault(); b.classList.add("drop"); } });
       b.addEventListener("dragleave", () => b.classList.remove("drop"));
       b.addEventListener("drop", (e) => {
