@@ -168,6 +168,15 @@
         </header>
         <div class="settings-scroll">
           <div class="settings">
+            <h2 id="set-playback">Playback</h2>
+            <div class="group">
+              <div class="setting">
+                <div><strong>Crossfade</strong><span id="xfNote">Off. The next song is always loaded ahead, so songs play back to back with no gap.</span></div>
+                <div class="slider-row"><input type="range" class="range" id="xfRange" min="0" max="12" step="1" value="0" aria-label="Crossfade length" /><span class="slider-val" id="xfVal">Off</span></div>
+              </div>
+              <label class="setting"><div><strong>Even out volume</strong><span>Plays quiet and loud songs at a similar level, like streaming apps do. Each song is measured once; your files aren't changed.</span></div><input type="checkbox" class="switch" id="levelToggle" /></label>
+            </div>
+
             <h2 id="set-files">Files</h2>
             <div class="group">
               <div class="setting">

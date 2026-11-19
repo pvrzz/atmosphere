@@ -99,7 +99,7 @@ function bindConnect() {
   window.addEventListener("player", (e) => {
     if (e.detail.type !== "time") apiPublishSoon();
   });
-  Player.audio.addEventListener("seeked", apiPublishSoon);
+  Player.on("seeked", apiPublishSoon);
   Connect.beat = setInterval(() => {
     if (!Player.audio.paused) apiPublishSoon();
   }, 10000);

@@ -532,6 +532,7 @@ fn main() {
             libcmd::lyrics_save_text,
             libcmd::set_fullscreen,
             libcmd::playlist_link,
+            libcmd::track_loudness,
             libcmd::playlist_relocate,
             libcmd::playlist_unlink
         ])

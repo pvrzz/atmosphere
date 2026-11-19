@@ -1,4 +1,4 @@
-/* atmosphere · player.js · Audio engine: queue, shuffle/repeat, EQ presets, filters, reverb, 8D, pitch and tempo, media keys and resume. */
+/* atmosphere · player.js · Audio engine: two-deck gapless playback, crossfade, volume levelling, queue, EQ and effects, media keys and resume. */
 const MEDIA_BASE = /Windows/.test(navigator.userAgent) ? "http://atmo.localhost/" : "atmo://localhost/";
 const mediaUrl = (kind, id) => `${MEDIA_BASE}${kind}/${encodeURIComponent(id)}`;
 const artUrl = (key) => (key ? mediaUrl("a", key) : null);
@@ -25,7 +25,20 @@ const PRESETS = [
 ];
 
 const Player = {
-  audio: new Audio(),
+  decks: [new Audio(), new Audio()],
+  deck: 0,
+  get audio() {
+    return this.decks[this.deck];
+  },
+  get standby() {
+    return this.decks[1 - this.deck];
+  },
+  standbyId: null,
+  standbyIndex: -1,
+  deckNodes: null,
+  transitionTimer: 0,
+  crossfade: 0,
+  leveling: false,
   ctx: null,
   nodes: null,
   pitchReady: false,
@@ -65,7 +78,15 @@ const Player = {
     const AC = window.AudioContext || window.webkitAudioContext;
     const ctx = new AC();
     this.ctx = ctx;
-    const src = ctx.createMediaElementSource(this.audio);
+    const input = ctx.createGain();
+    this.deckNodes = this.decks.map((el, i) => {
+      const src = ctx.createMediaElementSource(el);
+      const level = ctx.createGain();
+      const fade = ctx.createGain();
+      fade.gain.value = i === this.deck ? 1 : 0;
+      src.connect(level).connect(fade).connect(input);
+      return { src, level, fade };
+    });
     let pitch = null;
     try {
       await ctx.audioWorklet.addModule("pitch-worklet.js");
@@ -100,7 +121,7 @@ const Player = {
     const vol = ctx.createGain();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
-    let head = src;
+    let head = input;
     if (pitch) head = head.connect(pitch);
     head = head.connect(hp).connect(lp);
     for (const b of eq) head = head.connect(b);
@@ -110,6 +131,7 @@ const Player = {
     this.nodes = { pitch, hp, lp, eq, dry, wet, lfoDepth, vol, analyser };
     this.applyFx({});
     this.setVolume(this.volume);
+    this.decks.forEach((_, i) => this.applyLevel(i));
   },
 
   impulse(ctx, seconds, decay) {
@@ -126,9 +148,11 @@ const Player = {
     this.fx = { ...this.fx, ...partial };
     if (presetId !== undefined) this.fx.preset = presetId;
     const fx = this.bypass ? FX_DEFAULT : this.fx;
-    this.audio.playbackRate = fx.tempo;
-    this.audio.preservesPitch = !fx.vinyl;
-    this.audio.webkitPreservesPitch = !fx.vinyl;
+    for (const el of this.decks) {
+      el.playbackRate = fx.tempo;
+      el.preservesPitch = !fx.vinyl;
+      el.webkitPreservesPitch = !fx.vinyl;
+    }
     const n = this.nodes;
     if (n) {
       const t = this.ctx.currentTime;
@@ -162,10 +186,10 @@ const Player = {
     this.volume = Math.max(0, Math.min(1, v));
     const level = this.muted ? 0 : this.volume * this.volume;
     if (this.nodes) {
-      this.audio.volume = 1;
+      for (const el of this.decks) el.volume = 1;
       this.nodes.vol.gain.setTargetAtTime(level, this.ctx.currentTime, 0.015);
     } else {
-      this.audio.volume = level;
+      for (const el of this.decks) el.volume = level;
     }
     this.persist();
     this.emit("volume");
@@ -178,17 +202,187 @@ const Player = {
 
   async load(i, autoplay = true, startAt = 0) {
     if (i < 0 || i >= this.queue.length) return;
+    this.cancelTransition();
     this.flushListen();
+    const t = this.queue[i];
+    const preloaded = autoplay && !startAt && this.standbyIndex === i && this.standbyId === t.id && this.standby.readyState >= 2;
+    const old = this.audio;
+    if (preloaded) {
+      old.pause();
+      this.deck = 1 - this.deck;
+      this.audio.currentTime = 0;
+    } else {
+      if (this.standbyId === t.id) {
+        this.standbyId = null;
+        this.standbyIndex = -1;
+      }
+      this.audio.src = mediaUrl("t", t.id);
+      if (startAt) this.audio.addEventListener("loadedmetadata", () => (this.audio.currentTime = startAt), { once: true });
+    }
+    this.setFade(this.deck, 1);
+    this.setFade(1 - this.deck, 0);
+    if (preloaded) old.currentTime = 0;
     this.index = i;
-    const t = this.current;
     this.listenId = t.id;
     this.countedPlay = false;
-    this.audio.src = mediaUrl("t", t.id);
-    if (startAt) this.audio.addEventListener("loadedmetadata", () => (this.audio.currentTime = startAt), { once: true });
+    if (preloaded) {
+      this.standbyId = null;
+      this.standbyIndex = -1;
+    }
+    this.applyLevel(this.deck);
     this.updateSession();
     this.emit("track");
     this.persist();
     if (autoplay) await this.play();
+    this.prime();
+  },
+
+  setFade(deck, value) {
+    const n = this.deckNodes?.[deck];
+    if (!n) return;
+    const t = this.ctx.currentTime;
+    n.fade.gain.cancelScheduledValues(t);
+    n.fade.gain.setValueAtTime(value, t);
+  },
+
+  nextIndex() {
+    if (this.repeat === "one" || !this.queue.length) return -1;
+    if (this.index + 1 < this.queue.length) return this.index + 1;
+    return this.repeat === "all" ? 0 : -1;
+  },
+
+  prime() {
+    const ni = this.nextIndex();
+    const t = this.queue[ni];
+    const sb = this.standby;
+    if (!t || (ni === this.index && this.queue.length === 1)) {
+      if (this.standbyId) {
+        sb.removeAttribute("src");
+        sb.load();
+      }
+      this.standbyId = null;
+      this.standbyIndex = -1;
+      return;
+    }
+    this.standbyIndex = ni;
+    if (this.standbyId === t.id) return;
+    this.standbyId = t.id;
+    sb.pause();
+    sb.src = mediaUrl("t", t.id);
+    sb.preload = "auto";
+    sb.load();
+    this.setFade(1 - this.deck, 0);
+    this.applyLevel(1 - this.deck);
+  },
+
+  fadeFor() {
+    const cur = this.current;
+    const nxt = this.queue[this.standbyIndex];
+    if (!this.crossfade || !cur || !nxt) return 0.02;
+    const sameAlbum = cur.album && nxt.album && lnormP(cur.album) === lnormP(nxt.album) && (!cur.trackNo || !nxt.trackNo || nxt.trackNo === cur.trackNo + 1);
+    return sameAlbum ? 0.02 : this.crossfade;
+  },
+
+  cancelTransition() {
+    clearTimeout(this.transitionTimer);
+    this.transitionTimer = 0;
+  },
+
+  scheduleTransition() {
+    const a = this.audio;
+    if (this.transitionTimer || a.paused || this.standbyIndex < 0 || !isFinite(a.duration)) return;
+    const rate = a.playbackRate || 1;
+    const remaining = (a.duration - a.currentTime) / rate;
+    const fade = this.fadeFor();
+    if (remaining > fade + 1.5) return;
+    const lead = Math.max(fade, 0.03);
+    this.transitionTimer = setTimeout(() => this.transition(fade), Math.max(0, (remaining - lead) * 1000));
+  },
+
+  async transition(fade) {
+    this.transitionTimer = 0;
+    const ni = this.standbyIndex;
+    const t = this.queue[ni];
+    if (ni < 0 || !t || this.standbyId !== t.id || this.audio.paused) return;
+    await this.ensureGraph();
+    const outDeck = this.deck;
+    const inDeck = 1 - this.deck;
+    const out = this.decks[outDeck];
+    const inn = this.decks[inDeck];
+    inn.currentTime = 0;
+    this.setFade(inDeck, 0);
+    try {
+      await inn.play();
+    } catch {
+      return;
+    }
+    const now = this.ctx.currentTime;
+    const fin = this.deckNodes[inDeck].fade.gain;
+    const fout = this.deckNodes[outDeck].fade.gain;
+    fin.cancelScheduledValues(now);
+    fout.cancelScheduledValues(now);
+    if (fade > 0.1) {
+      const steps = 32;
+      const up = new Float32Array(steps).map((_, k) => Math.sin(((k / (steps - 1)) * Math.PI) / 2));
+      const down = new Float32Array(steps).map((_, k) => Math.cos(((k / (steps - 1)) * Math.PI) / 2));
+      fin.setValueCurveAtTime(up, now, fade);
+      fout.setValueCurveAtTime(down, now, fade);
+    } else {
+      fin.setValueAtTime(0, now);
+      fin.linearRampToValueAtTime(1, now + fade);
+      fout.setValueAtTime(1, now);
+      fout.linearRampToValueAtTime(0, now + fade);
+    }
+    this.flushListen();
+    this.deck = inDeck;
+    this.index = ni;
+    this.listenId = t.id;
+    this.countedPlay = false;
+    this.lastTick = performance.now();
+    this.standbyId = null;
+    this.standbyIndex = -1;
+    this.updateSession();
+    this.emit("track");
+    this.emit("state");
+    this.persist();
+    setTimeout(() => {
+      if (this.audio !== out) {
+        out.pause();
+        this.prime();
+      }
+    }, fade * 1000 + 120);
+  },
+
+  applyLevel(deck) {
+    const n = this.deckNodes?.[deck];
+    const el = this.decks[deck];
+    const t = deck === this.deck ? this.current : this.queue[this.standbyIndex];
+    if (!n || !t) return;
+    const set = (db) => n.level.gain.setTargetAtTime(Math.pow(10, db / 20), this.ctx.currentTime, 0.25);
+    if (!this.leveling) return set(0);
+    if (typeof t.gainDb === "number") return set(t.gainDb);
+    set(0);
+    const id = t.id;
+    invoke("track_loudness", { id }).then((g) => {
+      if (typeof g !== "number") return;
+      t.gainDb = g;
+      const still = deck === this.deck ? this.current?.id === id : this.standbyId === id;
+      if (still && this.leveling && this.decks[deck] === el) set(g);
+    }).catch(() => {});
+  },
+
+  setCrossfade(seconds) {
+    this.crossfade = Math.max(0, Math.min(12, Number(seconds) || 0));
+    this.cancelTransition();
+    this.persist();
+    this.emit("settings");
+  },
+
+  setLeveling(on) {
+    this.leveling = !!on;
+    this.decks.forEach((_, i) => this.applyLevel(i));
+    this.persist();
+    this.emit("settings");
   },
 
   async play() {
@@ -232,28 +426,31 @@ const Player = {
   playNext(tracks) {
     if (!this.current) return this.setQueue(tracks);
     this.queue.splice(this.index + 1, 0, ...tracks);
-    this.emit("queue");
-    this.persist();
+    this.queueChanged();
   },
 
   addToQueue(tracks) {
     if (!this.current) return this.setQueue(tracks);
     this.queue.push(...tracks);
-    this.emit("queue");
-    this.persist();
+    this.queueChanged();
   },
 
   removeAt(i) {
     if (i === this.index) return;
     this.queue.splice(i, 1);
     if (i < this.index) this.index--;
-    this.emit("queue");
-    this.persist();
+    this.queueChanged();
   },
 
   clearUpNext() {
     this.queue = this.current ? [this.current] : [];
     this.index = this.current ? 0 : -1;
+    this.queueChanged();
+  },
+
+  queueChanged() {
+    this.cancelTransition();
+    this.prime();
     this.emit("queue");
     this.persist();
   },
@@ -299,12 +496,16 @@ const Player = {
       this.index = 0;
       this.emit("queue");
     }
+    this.cancelTransition();
+    this.prime();
     this.persist();
     this.emit("state");
   },
 
   cycleRepeat() {
     this.repeat = { off: "all", all: "one", one: "off" }[this.repeat];
+    this.cancelTransition();
+    this.prime();
     this.persist();
     this.emit("state");
   },
@@ -320,7 +521,7 @@ const Player = {
     clearTimeout(this._persist);
     this._persist = setTimeout(() => {
       try {
-        localStorage.setItem("atmo.player", JSON.stringify({ queue: this.queue.map((t) => t.id), index: this.index, time: this.audio.currentTime || 0, volume: this.volume, shuffle: this.shuffle, repeat: this.repeat, fx: this.fx, bypass: this.bypass }));
+        localStorage.setItem("atmo.player", JSON.stringify({ queue: this.queue.map((t) => t.id), index: this.index, time: this.audio.currentTime || 0, volume: this.volume, shuffle: this.shuffle, repeat: this.repeat, fx: this.fx, bypass: this.bypass, crossfade: this.crossfade, leveling: this.leveling }));
       } catch {}
     }, 400);
   },
@@ -337,6 +538,8 @@ const Player = {
     this.repeat = saved.repeat || "off";
     this.fx = { ...structuredClone(FX_DEFAULT), ...(saved.fx || {}) };
     this.bypass = !!saved.bypass;
+    this.crossfade = Math.max(0, Math.min(12, Number(saved.crossfade) || 0));
+    this.leveling = !!saved.leveling;
     this.queue = (saved.queue || []).map(lookup).filter(Boolean);
     if (this.queue.length) this.load(Math.min(Math.max(0, saved.index), this.queue.length - 1), false, saved.time || 0);
     this.applyFx({});
@@ -370,25 +573,39 @@ const Player = {
     } else {
       this.index = cur ? this.queue.findIndex((t) => t.id === cur) : this.index;
     }
+    this.prime();
     this.emit("queue");
     this.emit("track");
     this.persist();
   },
 };
 
+const lnormP = (s) => (s || "").trim().toLowerCase();
+
+Player.on = (type, fn) => Player.decks.forEach((el) => el.addEventListener(type, (e) => { if (el === Player.audio) fn(e); }));
+
 (() => {
-  const a = Player.audio;
-  a.preload = "auto";
-  a.crossOrigin = "anonymous";
-  a.addEventListener("play", () => Player.emit("state"));
-  a.addEventListener("pause", () => Player.emit("state"));
-  a.addEventListener("ended", () => { Player.flushListen(); Player.next(true); });
-  a.addEventListener("playing", () => (Player.lastTick = performance.now()));
+  for (const el of Player.decks) {
+    el.preload = "auto";
+    el.crossOrigin = "anonymous";
+  }
+  const on = Player.on;
+  on("play", () => Player.emit("state"));
+  on("pause", () => { Player.cancelTransition(); Player.emit("state"); });
+  on("seeking", () => Player.cancelTransition());
+  on("ended", () => {
+    Player.cancelTransition();
+    Player.flushListen();
+    if (Player.standbyIndex >= 0 && Player.standbyIndex === Player.nextIndex()) Player.load(Player.standbyIndex);
+    else Player.next(true);
+  });
+  on("playing", () => (Player.lastTick = performance.now()));
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") { Player.flushListen(); } });
   window.addEventListener("beforeunload", () => Player.flushListen());
   let streak = 0;
-  a.addEventListener("playing", () => (streak = 0));
-  a.addEventListener("error", () => {
+  on("playing", () => (streak = 0));
+  on("error", () => {
+    const a = Player.audio;
     if (!a.src || !Player.current) return;
     streak++;
     if (streak === 1) toast(`Couldn't play “${Player.current.title}”. The file may have moved or be unreadable.`, "err");
@@ -398,7 +615,9 @@ const Player = {
     }
     if (Player.index + 1 < Player.queue.length) Player.next(true);
   });
-  a.addEventListener("timeupdate", () => {
+  on("timeupdate", () => {
+    const a = Player.audio;
+    Player.scheduleTransition();
     Player.emit("time");
     const nowTick = performance.now();
     if (!a.paused && Player.lastTick) {
@@ -414,7 +633,7 @@ const Player = {
     }
     if (Math.floor(a.currentTime) % 5 === 0) Player.persist();
   });
-  a.addEventListener("loadedmetadata", () => Player.emit("time"));
+  on("loadedmetadata", () => Player.emit("time"));
   if ("mediaSession" in navigator) {
     const ms = navigator.mediaSession;
     ms.setActionHandler("play", () => Player.play());

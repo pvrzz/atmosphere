@@ -522,3 +522,61 @@ mod tests {
         assert_eq!(range_of(None, 1000), None);
     }
 }
+
+static LOUDNESS: std::sync::LazyLock<tokio::sync::Semaphore> = std::sync::LazyLock::new(|| tokio::sync::Semaphore::new(1));
+
+pub fn gain_from_ebur128(log: &str) -> Option<f32> {
+    let lufs = regex::Regex::new(r"I:\s+(-?[\d.]+)\s+LUFS").ok()?.captures_iter(log).last()?.get(1)?.as_str().parse::<f32>().ok()?;
+    let peak = regex::Regex::new(r"Peak:\s+(-?[\d.]+|-inf)\s+dBFS").ok()?.captures_iter(log).last().and_then(|c| c[1].parse::<f32>().ok());
+    if !lufs.is_finite() || lufs < -70.0 {
+        return None;
+    }
+    let mut gain = (-14.0 - lufs).clamp(-20.0, 12.0);
+    if let Some(p) = peak.filter(|p| p.is_finite()) {
+        gain = gain.min(-1.0 - p);
+    }
+    Some((gain * 10.0).round() / 10.0)
+}
+
+#[tauri::command]
+pub async fn track_loudness(state: State<'_, AppState>, id: String) -> CmdResult<Option<f32>> {
+    let Some(t) = state.library.track(&id) else { return Ok(None) };
+    if t.gain_db.is_some() {
+        return Ok(t.gain_db);
+    }
+    let s = state.snapshot();
+    let Some(ffmpeg) = crate::engine::locate(&s.ytdlp_path, &s.ffmpeg_path).ok().and_then(|t| t.ffmpeg).or_else(|| crate::engine::find_tool("ffmpeg")) else { return Ok(None) };
+    let _permit = LOUDNESS.acquire().await.map_err(|e| e.to_string())?;
+    if let Some(g) = state.library.track(&id).and_then(|t| t.gain_db) {
+        return Ok(Some(g));
+    }
+    let out = crate::engine::command(&ffmpeg)
+        .args(["-hide_banner", "-nostats", "-i", &t.path, "-map", "0:a:0", "-af", "ebur128=peak=true", "-f", "null", "-"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    let gain = gain_from_ebur128(&String::from_utf8_lossy(&out.stderr));
+    if let Some(g) = gain {
+        state.library.set_gain(&id, g);
+    }
+    Ok(gain)
+}
+
+#[cfg(test)]
+mod loudness_tests {
+    use super::*;
+
+    #[test]
+    fn levels_toward_minus_14_without_clipping() {
+        let loud = "Summary:\n  Integrated loudness:\n    I:          -8.0 LUFS\n  True peak:\n    Peak:        0.4 dBFS";
+        assert_eq!(gain_from_ebur128(loud), Some(-6.0));
+        let quiet = "    I:         -20.0 LUFS\n    Peak:       -9.0 dBFS";
+        assert_eq!(gain_from_ebur128(quiet), Some(6.0));
+        let peaky = "    I:         -20.0 LUFS\n    Peak:       -2.0 dBFS";
+        assert_eq!(gain_from_ebur128(peaky), Some(1.0));
+        assert_eq!(gain_from_ebur128("nothing"), None);
+        assert_eq!(crate::library::parse_gain("-6.20 dB"), Some(-6.2));
+    }
+}

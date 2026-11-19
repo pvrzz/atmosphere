@@ -1065,3 +1065,8 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 /* featured on */
 .tile-kind { font-weight: 600; color: var(--text-2); }
 .tile-sub.on { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* playback settings */
+.slider-row { display: flex; align-items: center; gap: var(--s3); flex-shrink: 0; }
+.slider-row .range { width: 180px; }
+.slider-val { min-width: 34px; text-align: right; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }

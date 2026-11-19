@@ -238,6 +238,7 @@ async function init() {
   bindMini();
   bindConnect();
   bindUpdates();
+  bindPlaybackSettings();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));
@@ -1471,6 +1472,7 @@ function renderSettings() {
   $("#rightsInfo").textContent = at ? `You agreed on ${at}. Withdrawing it cancels downloads and asks again in the app.` : "Not confirmed yet.";
   renderTemplatePreview();
   renderSignin();
+  if (typeof renderPlaybackSettings === "function") renderPlaybackSettings();
   if (typeof renderApiSettings === "function") renderApiSettings();
   renderToolSettings();
   renderLibrarySettings();

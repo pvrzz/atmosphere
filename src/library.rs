@@ -38,6 +38,9 @@ pub struct Track {
     pub playlist: Option<String>,
     pub has_lyrics: bool,
     pub added: u64,
+    pub gain_db: Option<f32>,
+    pub sample_rate: Option<u32>,
+    pub channels: Option<u8>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -184,6 +187,7 @@ pub fn read_track(path: &Path, playlist: Option<String>) -> Result<Track> {
     let album_artist = get(&|t| t.get_string(ItemKey::AlbumArtist).map(String::from)).unwrap_or_default();
     let year = get(&|t| t.get_string(ItemKey::Year).or_else(|| t.get_string(ItemKey::RecordingDate)).or_else(|| t.get_string(ItemKey::ReleaseDate)).map(String::from)).and_then(|y| year_of(&y));
     let lyrics_tag = tag.and_then(|t| t.get_string(ItemKey::Lyrics)).is_some_and(|l| !l.trim().is_empty());
+    let gain_db = tag.and_then(|t| t.get_string(ItemKey::ReplayGainTrackGain)).and_then(parse_gain);
     let group = format!("{}|{}", if album_artist.is_empty() { &artist } else { &album_artist }, album).to_lowercase();
     let art_key = if album.is_empty() { hash(&path.to_string_lossy()) } else { hash(&group) };
     let art = tag.and_then(|t| t.pictures().first()).and_then(|p| save_art(&art_key, p.data()));
@@ -208,8 +212,16 @@ pub fn read_track(path: &Path, playlist: Option<String>) -> Result<Track> {
         playlist,
         has_lyrics: lyrics_tag || path.with_extension("lrc").exists(),
         added: now(),
+        gain_db,
+        sample_rate: props.sample_rate(),
+        channels: props.channels(),
         path: path_s,
     })
+}
+
+pub fn parse_gain(s: &str) -> Option<f32> {
+    let n: String = s.trim().trim_end_matches(|c: char| c.is_alphabetic() || c.is_whitespace()).trim().to_string();
+    n.parse::<f32>().ok().filter(|g| g.is_finite() && g.abs() < 60.0)
 }
 
 fn playlist_of(path: &Path, playlists_dir: &Path) -> Option<String> {
@@ -779,6 +791,13 @@ impl Library {
         let out = meta.clone();
         store("artists.json", &*artists);
         Ok(out)
+    }
+
+    pub fn set_gain(&self, id: &str, gain: f32) {
+        let changed = self.tracks.write().unwrap().get_mut(id).map(|t| t.gain_db = Some(gain)).is_some();
+        if changed {
+            self.persist();
+        }
     }
 
     pub fn refresh(&self, id: &str, playlists_dir: &Path) -> Result<Track> {

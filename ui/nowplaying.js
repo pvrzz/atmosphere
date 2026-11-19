@@ -330,3 +330,30 @@ function bindPlayer() {
   updateTime();
   updateVolume();
 }
+
+/* playback settings */
+function renderPlaybackSettings() {
+  const r = $("#xfRange");
+  if (!r) return;
+  if (document.activeElement !== r) r.value = String(Player.crossfade);
+  rangeFill(r);
+  $("#xfVal").textContent = Player.crossfade ? `${Player.crossfade} s` : "Off";
+  $("#xfNote").textContent = Player.crossfade
+    ? `Songs blend over ${Player.crossfade} seconds. Songs from the same album still play gapless, so live and continuous albums flow.`
+    : "Off. The next song is always loaded ahead, so songs play back to back with no gap.";
+  $("#levelToggle").checked = Player.leveling;
+}
+
+function bindPlaybackSettings() {
+  const r = $("#xfRange");
+  if (!r) return;
+  r.addEventListener("input", () => {
+    Player.setCrossfade(r.value);
+    renderPlaybackSettings();
+  });
+  $("#levelToggle").addEventListener("change", (e) => Player.setLeveling(e.target.checked));
+  window.addEventListener("player", (e) => {
+    if (e.detail.type === "settings") renderPlaybackSettings();
+  });
+  renderPlaybackSettings();
+}
