@@ -205,9 +205,46 @@ fn best_thumbnail(v: &Value) -> Option<String> {
     s(&v["thumbnail"])
 }
 
+static DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+[-–—]\s+").unwrap());
+static TITLE_JUNK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\s*[\(\[【][^)\]】]*\b(official|music\s*video|lyrics?|lyric\s*video|visuali[sz]er|audio|video\s*oficial|clipe\s*oficial|mv|m/v|hd|hq|4k|8k|explicit|clean\s*version|full\s*song|premiere)\b[^)\]】]*[\)\]】]").unwrap()
+});
+static TITLE_TAIL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\s*[|｜]\s*.*$|\s+(official\s+(music\s+)?(video|audio)|lyric\s+video|music\s+video)\s*$").unwrap());
+
+pub fn tidy_title(title: &str) -> String {
+    let t = TITLE_JUNK.replace_all(title.trim(), "");
+    let t = TITLE_TAIL.replace_all(&t, "");
+    let t = t.trim().trim_end_matches(['-', '–', '—', ':']).trim();
+    if t.is_empty() { title.trim().to_string() } else { t.to_string() }
+}
+
+pub fn tidy_channel(name: &str) -> String {
+    let n = name.trim();
+    let n = n.strip_suffix(" - Topic").unwrap_or(n);
+    let n = n.strip_suffix("VEVO").filter(|r| !r.is_empty()).unwrap_or(n);
+    n.trim().to_string()
+}
+
+pub fn codec_name(codec: &str) -> String {
+    match codec.to_ascii_lowercase().as_str() {
+        "opus" => "Opus".into(),
+        "vorbis" => "Vorbis".into(),
+        "mp4a" | "aac" => "AAC".into(),
+        "pcm" => "PCM".into(),
+        other => other.to_uppercase(),
+    }
+}
+
+pub fn split_artist_title(title: &str) -> Option<(String, String)> {
+    let m = DASH.find(title)?;
+    let (artist, rest) = (title[..m.start()].trim(), title[m.end()..].trim());
+    let numbering = artist.chars().all(|c| c.is_ascii_digit() || c == '.');
+    (!artist.is_empty() && !rest.is_empty() && artist.chars().count() <= 100 && !numbering).then(|| (artist.to_string(), rest.to_string()))
+}
+
 pub fn entry_from_info(v: &Value, index: u32) -> Entry {
     let extractor = s(&v["extractor_key"]).or_else(|| s(&v["ie_key"])).unwrap_or_default();
-    let uploader = s(&v["uploader"]).or_else(|| s(&v["channel"])).unwrap_or_default();
+    let uploader = s(&v["uploader"]).or_else(|| s(&v["channel"])).map(|u| tidy_channel(&u)).unwrap_or_default();
     let has_formats = v["formats"].is_array() || v["vcodec"].is_string() || v["acodec"].is_string();
     let (media, mut availability) = if has_formats {
         let (m, a) = summarize_formats(v);
@@ -226,15 +263,20 @@ pub fn entry_from_info(v: &Value, index: u32) -> Entry {
         .as_u64()
         .map(|y| y as u16)
         .or_else(|| release_date.as_deref().and_then(|d| d.get(..4)?.parse().ok()));
+    let raw_title = s(&v["track"]).or_else(|| s(&v["title"])).unwrap_or_else(|| "Untitled".into());
+    let raw_artist = s(&v["artist"]).or_else(|| joined(&v["artists"])).or_else(|| s(&v["creator"]));
+    let real_artist = raw_artist.as_ref().is_some_and(|a| *a != uploader) && !extractor.to_ascii_lowercase().contains("soundcloud");
+    let cleaned = tidy_title(&raw_title);
+    let (artist, title) = match (real_artist, split_artist_title(&cleaned)) {
+        (false, Some((a, t))) => (a, tidy_title(&t)),
+        _ => (raw_artist.map(|a| tidy_channel(&a)).unwrap_or_else(|| uploader.clone()), cleaned),
+    };
     Entry {
         index,
         id: s(&v["id"]).unwrap_or_default(),
         url: s(&v["webpage_url"]).or_else(|| s(&v["original_url"])).or_else(|| s(&v["url"])).unwrap_or_default(),
-        title: s(&v["track"]).or_else(|| s(&v["title"])).unwrap_or_else(|| "Untitled".into()),
-        artist: s(&v["artist"])
-            .or_else(|| joined(&v["artists"]))
-            .or_else(|| s(&v["creator"]))
-            .unwrap_or_else(|| uploader.clone()),
+        title,
+        artist,
         uploader,
         album: s(&v["album"]),
         album_artist: s(&v["album_artist"]).or_else(|| joined(&v["album_artists"])),
@@ -609,33 +651,51 @@ impl Prober {
         self.running.lock().unwrap().insert(collection.id.clone(), stop.clone());
         let this = self.clone();
         tauri::async_runtime::spawn(async move {
-            let mut args = base_args(&settings, &tools);
-            args.extend(["-j", "--ignore-errors", "--yes-playlist", "--", &collection.url].map(String::from));
             let mut entries = collection.entries.clone();
             let mut failed = 0u32;
-            let spawned = engine::command(&tools.ytdlp).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn();
-            if let Ok(mut child) = spawned {
-                if let Some(stdout) = child.stdout.take() {
-                    let mut lines = BufReader::new(stdout).lines();
-                    loop {
-                        tokio::select! {
-                            _ = stop.notified() => { let _ = child.kill().await; return; }
-                            line = lines.next_line() => {
-                                let Ok(Some(line)) = line else { break };
-                                let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
-                                let idx = v["playlist_index"].as_u64().map(|i| i as u32);
-                                let vid = s(&v["id"]).unwrap_or_default();
-                                let slot = entries.iter().position(|e| Some(e.index) == idx).or_else(|| entries.iter().position(|e| e.id == vid));
-                                if let Some(pos) = slot {
-                                    let entry = entry_from_info(&v, entries[pos].index);
-                                    entries[pos] = entry.clone();
-                                    let _ = app.emit(PROBE_EVENT, ProbeEvent::Entry { collection: collection.id.clone(), entry: Box::new(entry) });
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+            let mut workers = Vec::new();
+            for (a, b) in detail_ranges(entries.len()) {
+                let mut args = base_args(&settings, &tools);
+                args.extend(["-j".into(), "--ignore-errors".into(), "--yes-playlist".into(), "--playlist-items".into(), format!("{a}-{b}"), "--".into(), collection.url.clone()]);
+                let ytdlp = tools.ytdlp.clone();
+                let tx = tx.clone();
+                workers.push(tauri::async_runtime::spawn(async move {
+                    let Ok(mut child) = engine::command(&ytdlp).args(&args).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn() else { return };
+                    if let Some(stdout) = child.stdout.take() {
+                        let mut lines = BufReader::new(stdout).lines();
+                        while let Ok(Some(line)) = lines.next_line().await {
+                            if let Ok(v) = serde_json::from_str::<Value>(&line) {
+                                if tx.send(v).is_err() {
+                                    break;
                                 }
                             }
                         }
                     }
+                    let _ = child.wait().await;
+                }));
+            }
+            drop(tx);
+            loop {
+                tokio::select! {
+                    _ = stop.notified() => {
+                        for w in &workers {
+                            w.abort();
+                        }
+                        return;
+                    }
+                    next = rx.recv() => {
+                        let Some(v) = next else { break };
+                        let idx = v["playlist_index"].as_u64().map(|i| i as u32);
+                        let vid = s(&v["id"]).unwrap_or_default();
+                        let slot = entries.iter().position(|e| Some(e.index) == idx).or_else(|| entries.iter().position(|e| !vid.is_empty() && e.id == vid));
+                        if let Some(pos) = slot {
+                            let entry = entry_from_info(&v, entries[pos].index);
+                            entries[pos] = entry.clone();
+                            let _ = app.emit(PROBE_EVENT, ProbeEvent::Entry { collection: collection.id.clone(), entry: Box::new(entry) });
+                        }
+                    }
                 }
-                let _ = child.wait().await;
             }
             failed += entries.iter().filter(|e| !e.detailed).count() as u32;
             let extractor = s(&raw["extractor_key"]).unwrap_or_default();
@@ -653,10 +713,61 @@ impl Prober {
     }
 }
 
+fn detail_ranges(n: usize) -> Vec<(usize, usize)> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let parts = n.div_ceil(5).clamp(1, 4);
+    let size = n.div_ceil(parts);
+    (0..parts).map(|p| (p * size + 1, ((p + 1) * size).min(n))).filter(|(a, b)| a <= b).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn splits_details_into_up_to_four_ranges() {
+        assert_eq!(detail_ranges(0), vec![]);
+        assert_eq!(detail_ranges(3), vec![(1, 3)]);
+        assert_eq!(detail_ranges(6), vec![(1, 3), (4, 6)]);
+        assert_eq!(detail_ranges(20), vec![(1, 5), (6, 10), (11, 15), (16, 20)]);
+        let big = detail_ranges(101);
+        assert_eq!(big.len(), 4);
+        assert_eq!(big.last().unwrap().1, 101);
+    }
+
+    #[test]
+    fn youtube_titles_lose_video_clutter() {
+        let v = json!({ "extractor_key": "Youtube", "id": "9", "title": "Westwood – Eyes (Official Music Video)", "uploader": "Westwood", "formats": [] });
+        let e = entry_from_info(&v, 1);
+        assert_eq!((e.artist.as_str(), e.title.as_str()), ("Westwood", "Eyes"));
+        assert_eq!(tidy_title("Problems [Official Audio]"), "Problems");
+        assert_eq!(tidy_title("Right Now | Official Video"), "Right Now");
+        assert_eq!(tidy_title("Crying Alive (Lyric Video) (feat. Nova)"), "Crying Alive (feat. Nova)");
+        assert_eq!(tidy_title("Glass (Night Remix)"), "Glass (Night Remix)");
+        assert_eq!(tidy_title("OWN ME (prod. siem spark)"), "OWN ME (prod. siem spark)");
+        assert_eq!(tidy_title("Love/Hate"), "Love/Hate");
+        assert_eq!(tidy_channel("Westwood - Topic"), "Westwood");
+        assert_eq!(tidy_channel("WestwoodVEVO"), "Westwood");
+        assert_eq!(codec_name("opus"), "Opus");
+        assert_eq!(codec_name("mp3"), "MP3");
+    }
+
+    #[test]
+    fn soundcloud_titles_carry_the_real_artist() {
+        let v = json!({ "extractor_key": "Soundcloud", "id": "1", "title": "CLV, Oscar Yuan & Luminate - Signal Code", "track": "CLV, Oscar Yuan & Luminate - Signal Code", "artist": "Monstercat", "uploader": "Monstercat", "formats": [] });
+        let e = entry_from_info(&v, 1);
+        assert_eq!((e.artist.as_str(), e.title.as_str()), ("CLV, Oscar Yuan & Luminate", "Signal Code"));
+        let own = json!({ "extractor_key": "Soundcloud", "id": "2", "title": "OWN ME (prod. siem spark)", "uploader": "pvrz", "formats": [] });
+        let e = entry_from_info(&own, 1);
+        assert_eq!((e.artist.as_str(), e.title.as_str()), ("pvrz", "OWN ME (prod. siem spark)"));
+        let music = json!({ "extractor_key": "Youtube", "id": "3", "title": "Daft Punk - Get Lucky (Official Video)", "track": "Get Lucky", "artist": "Daft Punk", "uploader": "DaftPunkVEVO", "formats": [] });
+        assert_eq!(entry_from_info(&music, 1).title, "Get Lucky");
+        assert!(split_artist_title("01 - Intro").is_none());
+        assert!(split_artist_title("Self-Titled").is_none());
+    }
 
     fn e(artist: &str, album: Option<&str>, mins: u64, n: Option<u32>) -> Entry {
         Entry {

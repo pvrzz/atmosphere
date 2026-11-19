@@ -19,8 +19,27 @@ const Lib = {
 };
 
 const lnorm = (s) => (s || "").trim().toLowerCase();
-const primaryArtist = (s) => (s || "").split(/\s*(?:,|;|\bfeat\.?|\bft\.?|\bfeaturing\b)\s*/i)[0].trim() || "Unknown artist";
-const artistsOf = (t) => [...new Set([t.albumArtist, ...(t.artist || "").split(/\s*(?:,|;|\bfeat\.?|\bft\.?|\bfeaturing\b)\s*/i)].map((x) => (x || "").trim()).filter(Boolean))];
+function splitNames(s) {
+  const text = (s || "").trim();
+  let parts = text.split(/\s*(?:,|;|\s(?:feat\.?|ft\.?|featuring)\s|^(?:feat\.?|ft\.?)\s)\s*/i);
+  if (/,/.test(text)) parts = parts.flatMap((p) => p.split(/\s+&\s+/));
+  return parts.map((p) => p.trim()).filter(Boolean);
+}
+function titleCredits(title) {
+  const t = title || "";
+  const inBrackets = [...t.matchAll(/[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]/gi)].map((m) => m[1]);
+  const trailing = t.match(/\s(?:feat\.?|ft\.?|featuring)\s+([^\(\[]+)$/i);
+  return [...inBrackets, trailing?.[1]].filter(Boolean).flatMap((x) => splitNames(x.replace(/,?\s+&\s+/g, ", ")));
+}
+const primaryArtist = (s) => splitNames(s)[0] || "Unknown artist";
+const artistsOf = (t) => {
+  const seen = new Map();
+  for (const n of [t.albumArtist, ...splitNames(t.artist), ...titleCredits(t.title)]) {
+    const k = lnorm(n);
+    if (k && !seen.has(k)) seen.set(k, n.trim());
+  }
+  return [...seen.values()];
+};
 const sig = (t) => `${lnorm(t.title)}|${lnorm(primaryArtist(t.artist))}|${Math.round((t.durationMs || 0) / 2000)}`;
 const albumKind = (a) => {
   const mins = a.duration / 60000;
@@ -52,7 +71,7 @@ function buildIndexes(snap) {
   const artists = new Map();
   const touch = (name) => {
     const k = lnorm(name);
-    if (!artists.has(k)) artists.set(k, { key: k, name, meta: metaByName.get(k) || null, albums: [], tracks: [], appearsOn: [] });
+    if (!artists.has(k)) artists.set(k, { key: k, name, meta: metaByName.get(k) || null, albums: [], tracks: [], appearsOn: [], featured: [] });
     return artists.get(k);
   };
   for (const a of albums.values()) touch(a.artist).albums.push(a);
@@ -63,7 +82,33 @@ function buildIndexes(snap) {
       if (ar && lnorm(a.artist) !== ar.key && !ar.appearsOn.includes(a)) ar.appearsOn.push(a);
     }
   }
-  for (const ar of artists.values()) ar.albums.sort((x, y) => (y.year || 0) - (x.year || 0));
+  for (const a of albums.values()) {
+    const byArtist = new Map();
+    for (const t of a.tracks) {
+      for (const n of artistsOf(t)) {
+        const k = lnorm(n);
+        if (k === lnorm(a.artist)) continue;
+        if (!byArtist.has(k)) byArtist.set(k, []);
+        byArtist.get(k).push(t);
+      }
+    }
+    for (const [k, tracks] of byArtist) {
+      const ar = artists.get(k);
+      if (ar) ar.featured.push({ kind: albumKind(a), title: a.title, by: a.artist, art: a.art, year: a.year, on: tracks.map((t) => t.title), album: a });
+    }
+  }
+  for (const t of Lib.songs) {
+    if (t.album) continue;
+    const main = lnorm(primaryArtist(t.artist));
+    for (const n of artistsOf(t)) {
+      const ar = artists.get(lnorm(n));
+      if (ar && ar.key !== main) ar.featured.push({ kind: "Song", title: t.title, by: primaryArtist(t.artist), art: t.art, year: t.year, on: [], track: t });
+    }
+  }
+  for (const ar of artists.values()) {
+    ar.albums.sort((x, y) => (y.year || 0) - (x.year || 0));
+    ar.featured.sort((x, y) => (y.year || 0) - (x.year || 0) || x.title.localeCompare(y.title));
+  }
   Lib.artists = artists;
 }
 
@@ -561,6 +606,16 @@ function songsView(root) {
   requestAnimationFrame(draw);
 }
 
+function featuredCard(f) {
+  const open = () => (f.album ? openLib("album", f.album.key) : playList([f.track]));
+  const onLine = f.on.length && !(f.on.length === 1 && lnorm(f.on[0]) === lnorm(f.title)) ? `on ${f.on.slice(0, 2).join(", ")}${f.on.length > 2 ? ` +${f.on.length - 2}` : ""}` : "";
+  return h("div", { class: "card-tile", role: "button", tabindex: "0", "data-album": f.album?.key || null, onclick: open, onkeydown: (e) => { if (e.key === "Enter") open(); } },
+    h("div", { class: "tile-art" }, cover(f.art, "tile-img", f.title), h("button", { class: "tile-play", "aria-label": `Play ${f.title}`, onclick: (e) => { e.stopPropagation(); playList(f.album ? f.album.tracks : [f.track]); } }, icon("player-play-filled"))),
+    h("div", { class: "tile-title" }, f.title),
+    h("div", { class: "tile-sub" }, h("span", { class: "tile-kind" }, f.kind), ` · ${f.by}`),
+    onLine ? h("div", { class: "tile-sub on" }, onLine) : null);
+}
+
 function albumCard(a) {
   return h("div", { class: "card-tile", role: "button", tabindex: "0", "data-album": a.key, onclick: () => openLib("album", a.key), onkeydown: (e) => { if (e.key === "Enter") openLib("album", a.key); } },
     h("div", { class: "tile-art" }, cover(a.art, "tile-img", a.title), h("button", { class: "tile-play", "aria-label": `Play ${a.title}`, onclick: (e) => { e.stopPropagation(); playList(a.tracks); } }, icon("player-play-filled"))),
@@ -641,7 +696,7 @@ function artistView(root, key) {
   body.append(h("section", {}, h("h2", { class: "sec" }, "Popular"), trackList(popular, { cover: true, list: popular })));
   if (full.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Albums"), h("div", { class: "grid" }, ...full.map(albumCard))));
   if (small.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Singles & EPs"), h("div", { class: "grid" }, ...small.map(albumCard))));
-  if (ar.appearsOn.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Appears on"), h("div", { class: "grid" }, ...ar.appearsOn.map(albumCard))));
+  if (ar.featured.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Featured on"), h("div", { class: "grid" }, ...ar.featured.map(featuredCard))));
   body.append(h("section", { class: "about" }, h("h2", { class: "sec" }, "About"), ar.meta?.bio ? h("p", { class: "bio" }, ar.meta.bio) : h("button", { class: "link muted", onclick: () => editArtist(ar) }, "Add a bio and photo for this artist")));
   root.append(body);
 }

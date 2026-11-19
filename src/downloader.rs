@@ -461,14 +461,14 @@ fn plan(entry: &Entry, save: &SaveOptions, has_ffmpeg: bool) -> Result<Plan> {
         .best_codec
         .as_deref()
         .map(|c| match media.best_abr {
-            Some(a) => format!("{} {a} kbps", c.to_uppercase()),
-            None => c.to_uppercase(),
+            Some(a) => format!("{} {a} kbps", crate::media::codec_name(c)),
+            None => crate::media::codec_name(c),
         })
         .unwrap_or_else(|| "best available".into());
     let original_label = format!("original {}", media.original_ext.as_deref().unwrap_or("file").to_uppercase());
     let src = if from_original { original_label.clone() } else { stream.clone() };
     let lossless_source = from_original || media.lossless;
-    let source_format = if from_original { "download/bestaudio/best" } else { "bestaudio/best" };
+    let source_format = if from_original { "download/bestaudio[format_id!*=drc]/bestaudio/best" } else { "bestaudio[format_id!*=drc]/bestaudio/best" };
     let mut notes = Vec::new();
     let needs_ffmpeg = |what: &str| -> Result<()> {
         if has_ffmpeg {
@@ -490,18 +490,18 @@ fn plan(entry: &Entry, save: &SaveOptions, has_ffmpeg: bool) -> Result<Plan> {
     Ok(match save.save_as {
         SaveAs::Original => {
             if media.original {
-                let mut p = audio("download/bestaudio/best");
+                let mut p = audio("download/bestaudio[format_id!*=drc]/bestaudio/best");
                 p.extract = None;
                 p.label = format!("Original file{}", media.original_ext.as_deref().map(|e| format!(" · {}", e.to_uppercase())).unwrap_or_default());
                 p
             } else {
-                let mut p = audio("bestaudio/best");
+                let mut p = audio("bestaudio[format_id!*=drc]/bestaudio/best");
                 notes.push("The uploader hasn't offered an original file, so the best stream was saved instead.".into());
                 p.notes = notes;
                 p
             }
         }
-        SaveAs::Best => audio("bestaudio/best"),
+        SaveAs::Best => audio("bestaudio[format_id!*=drc]/bestaudio/best"),
         SaveAs::Mp3 => {
             needs_ffmpeg("Saving as MP3")?;
             let kbps = snap_bitrate(save.mp3_bitrate, source_abr);
@@ -510,7 +510,7 @@ fn plan(entry: &Entry, save: &SaveOptions, has_ffmpeg: bool) -> Result<Plan> {
             }
             let floor = kbps.saturating_sub(8);
             Plan {
-                format: if from_original { source_format.into() } else { format!("bestaudio[acodec^=mp3][abr>={floor}]/bestaudio/best") },
+                format: if from_original { source_format.into() } else { format!("bestaudio[acodec^=mp3][abr>={floor}][format_id!*=drc]/bestaudio[format_id!*=drc]/bestaudio/best") },
                 sort: None,
                 extract: Some(("mp3".into(), Some(kbps))),
                 merge: None,
@@ -523,7 +523,7 @@ fn plan(entry: &Entry, save: &SaveOptions, has_ffmpeg: bool) -> Result<Plan> {
         SaveAs::M4a => {
             needs_ffmpeg("Saving as M4A")?;
             Plan {
-                format: "bestaudio[acodec^=mp4a]/bestaudio/best".into(),
+                format: "bestaudio[acodec^=mp4a][format_id!*=drc]/bestaudio[format_id!*=drc]/bestaudio/best".into(),
                 sort: None,
                 extract: Some(("m4a".into(), source_abr.map(|a| a.max(128)))),
                 merge: None,

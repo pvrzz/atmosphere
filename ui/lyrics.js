@@ -152,11 +152,12 @@ function openLyrics() {
 function renderLyricsAll() {
   renderLyricsPanel();
   if (Lyr.tv) renderTv();
+  if (typeof Mini !== "undefined" && Mini.on) renderMiniPanel();
 }
 
 function tick() {
   Lyr.raf = 0;
-  const visible = !$("#lyricsPanel").hidden || Lyr.tv;
+  const visible = !$("#lyricsPanel").hidden || Lyr.tv || (typeof Mini !== "undefined" && Mini.on && Mini.panelShown && Mini.prefs.panel === "lyrics");
   if (!visible) return;
   const l = Lyr.data;
   if (l?.synced) {

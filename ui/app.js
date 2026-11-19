@@ -40,6 +40,7 @@ const PLATFORM_ICON = [
   [/(^|\.)x\.com|twitter\.com/i, "brand-x", "X"],
   [/instagram\.com/i, "brand-instagram", "Instagram"],
 ];
+const codecName = (c) => ({ opus: "Opus", vorbis: "Vorbis", mp4a: "AAC", aac: "AAC", pcm: "PCM" })[(c || "").toLowerCase()] || (c || "").toUpperCase();
 const platformIcon = (name) => (PLATFORM_ICON.find((p) => p[2] === name) || [0, "world"])[1];
 
 const state = {
@@ -600,7 +601,7 @@ function defaults(c, e) {
     isrc: "",
     bpm: null,
     key: "",
-    comment: "",
+    comment: [e.description?.trim(), e.url ? `Source: ${e.url}` : ""].filter(Boolean).join("\n\n"),
     lyrics: e.lyrics || "",
     artwork: rel || c.data.single ? c.album.artwork : { kind: "keep" },
   };
@@ -999,7 +1000,7 @@ function inspector(c, e, inline) {
 function availabilityFlags(e) {
   if (!e.media) return [h("span", { class: "flag" }, e.detailed ? "Unknown formats" : "Checking…")];
   const m = e.media, out = [];
-  if (m.bestCodec) out.push(h("span", { class: "flag" }, `${m.bestCodec.toUpperCase()}${m.bestAbr ? ` ${m.bestAbr} kbps` : ""} best audio`));
+  if (m.bestCodec) out.push(h("span", { class: "flag" }, `${codecName(m.bestCodec)}${m.bestAbr ? ` ${m.bestAbr} kbps` : ""} best audio`));
   if (m.original) out.push(h("span", { class: "flag" }, `Original ${m.originalExt ? m.originalExt.toUpperCase() : "file"}`));
   if (m.lossless) out.push(h("span", { class: "flag" }, "Lossless source"));
   if (m.hasVideo) out.push(h("span", { class: "flag" }, m.heights.length ? `Video up to ${m.heights[0]}p` : "Video"));
@@ -1020,7 +1021,7 @@ function selectionCaps(c) {
   const lossless = known.some((e) => e.media.lossless || (e.media.original && e.media.originalLossless));
   const originals = known.filter((e) => e.media.original).length;
   const heights = [...new Set(known.flatMap((e) => e.media.heights || []))].sort((a, b) => b - a);
-  const codecs = [...new Set(known.map((e) => e.media.bestCodec && `${e.media.bestCodec.toUpperCase()}${e.media.bestAbr ? ` ${e.media.bestAbr} kbps` : ""}`).filter(Boolean))];
+  const codecs = [...new Set(known.map((e) => e.media.bestCodec && `${codecName(e.media.bestCodec)}${e.media.bestAbr ? ` ${e.media.bestAbr} kbps` : ""}`).filter(Boolean))];
   return {
     count: ents.length,
     unknown: known.length < ents.length,
