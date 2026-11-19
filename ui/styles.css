@@ -556,6 +556,8 @@ label.setting { cursor: pointer; }
 .hero .row { margin-top: var(--s2); flex-wrap: wrap; }
 .hero .path { color: var(--text-3); font: 11.5px var(--mono); justify-self: start; }
 .on-hero { position: absolute; top: var(--s4); left: var(--s4); background: rgba(10, 12, 18, 0.4); color: #fff; }
+.hero:has(> .on-hero) { padding-top: calc(var(--s4) + 28px + var(--s4)); }
+.on-hero { z-index: 2; }
 .artist-hero { grid-template-columns: 180px minmax(0, 1fr); }
 .avatar { width: 180px; height: 180px; border-radius: 50%; object-fit: cover; background: var(--surface-2); box-shadow: 0 18px 44px -18px rgba(0, 0, 0, 0.6); display: grid; place-items: center; color: var(--text-3); }
 .avatar .i { width: 52px; height: 52px; }
