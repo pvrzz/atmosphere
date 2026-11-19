@@ -42,7 +42,8 @@ jobs:
         run: cargo install tauri-cli --version "^2" --locked
 
       - name: Build installers
-        run: cargo tauri build
+        shell: bash
+        run: cargo tauri build --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Portable executable
         if: runner.os == 'Windows'

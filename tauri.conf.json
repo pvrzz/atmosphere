@@ -64,6 +64,18 @@
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
       }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE0NzUxREY1OTc5QTJGRjQKUldUMEw1cVg5UjExcEk0dUM2WFlyWURKMkpOZnVZcWZ3eDdiazVoZWdlcEJnbEVpVC9ZWmxMU2wK",
+      "endpoints": [
+        "https://github.com/pvrzz/atmosphere/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

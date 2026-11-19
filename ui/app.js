@@ -157,6 +157,7 @@ async function init() {
   bindBackup();
   bindMini();
   bindConnect();
+  bindUpdates();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));

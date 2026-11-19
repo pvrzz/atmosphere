@@ -123,12 +123,13 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - **Portable:** `atmosphere.exe` runs from any folder. Put an empty file named `portable` next to it, and all data stays beside it.
 - **Tidy:** temp files and stalled partial downloads are cleared automatically on launch, whenever downloads finish, and on exit. **Settings → Storage** shows what Atmosphere keeps and lets you clean it up.
 - **Back up and restore** your settings, stats, liked songs and artist photos as a single `.zip` from **Settings → Storage**.
+- **Automatic updates:** Atmosphere checks this repo's releases and offers each new version with its notes. Updates are signed and verified before they install. You can turn checking off in Settings.
 - **Clean uninstall:** the Windows uninstaller keeps your data by default. If you choose to delete it, you're offered a backup first. Your music files are never touched.
 
 ## Get started
 
 ### Download
-Grab a build from the [Actions](../../actions) tab, under the latest run's artifacts:
+Grab the latest version from [Releases](../../releases/latest). Installed copies keep themselves up to date.
 
 | Platform | Files |
 | --- | --- |
@@ -202,6 +203,7 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/direct.rs` | Checks and reads direct audio and video file links |
 | `src/backup.rs` | Backup and restore of settings, stats and liked songs |
 | `src/api.rs` | The opt-in local API for other apps ([guide](docs/api.md)) |
+| `src/updates.rs` | Signed in-app updates from GitHub Releases ([releasing](docs/releasing.md)) |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
 | `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |

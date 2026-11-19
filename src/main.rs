@@ -14,6 +14,7 @@ mod media;
 mod settings;
 mod storage;
 mod tagging;
+mod updates;
 
 use base64::Engine as _;
 use downloader::{Downloader, JobRequest, SaveOptions};
@@ -442,6 +443,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .register_asynchronous_uri_scheme_protocol("atmo", |ctx, request, responder| {
@@ -463,6 +465,9 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             signin_check,
+            updates::app_version,
+            updates::update_check,
+            updates::update_install,
             api_status,
             api_new_token,
             api_publish,
