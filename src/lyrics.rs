@@ -573,8 +573,7 @@ mod tests {
             println!("{title}: provider={:?} synced={:?} words={:?} lines={:?} tried={:?}", l.map(|x| &x.provider), l.map(|x| x.synced), l.map(|x| x.word_synced), l.map(|x| x.lines.len()), f.tried.iter().map(|t| format!("{}: {}", t.provider, t.outcome)).collect::<Vec<_>>());
             assert!(l.is_some_and(|x| x.synced));
         }
-        let mut only_netease = Settings::default();
-        only_netease.lyrics_providers = vec![ProviderCfg { id: "netease".into(), enabled: true }];
+        let only_netease = Settings { lyrics_providers: vec![ProviderCfg { id: "netease".into(), enabled: true }], ..Default::default() };
         let q = Query { title: "Get Lucky".into(), artist: "Daft Punk".into(), duration_ms: Some(248_000), ..Default::default() };
         let f = find(&http, &only_netease, &q, true).await.unwrap();
         let l = f.lyrics.as_ref();

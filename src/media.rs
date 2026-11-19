@@ -387,7 +387,45 @@ fn release_artist(kind: &str, fallback: &str, entries: &[Entry]) -> String {
     fallback.to_string()
 }
 
+fn browser_label(id: &str) -> String {
+    match id.to_ascii_lowercase().as_str() {
+        "chrome" => "Chrome".into(),
+        "chromium" => "Chromium".into(),
+        "edge" => "Edge".into(),
+        "firefox" => "Firefox".into(),
+        "brave" => "Brave".into(),
+        "opera" => "Opera".into(),
+        "vivaldi" => "Vivaldi".into(),
+        "safari" => "Safari".into(),
+        "whale" => "Whale".into(),
+        _ => "your browser".into(),
+    }
+}
+
+pub fn cookie_error(stderr: &str) -> Option<String> {
+    let lower = stderr.to_lowercase();
+    if !lower.contains("cookie") {
+        return None;
+    }
+    static FROM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)extracting cookies from (\w+)").unwrap());
+    let b = FROM.captures(stderr).map(|c| browser_label(&c[1])).unwrap_or_else(|| "your browser".into());
+    if lower.contains("could not copy") || lower.contains("permission denied") || lower.contains("database is locked") {
+        Some(format!("{b} keeps its sign-in locked while it's running. Quit {b} completely (check the system tray too), then try again. Firefox can stay open, or use a cookies.txt file instead."))
+    } else if lower.contains("could not find") && lower.contains("cookies database") {
+        Some(format!("Couldn't find a {b} profile on this computer. Choose the browser you actually sign in with."))
+    } else if lower.contains("decrypt") || lower.contains("dpapi") || lower.contains("app-bound") || lower.contains("keyring") {
+        Some(format!("{b} encrypts its sign-in so other apps can't read it. Firefox works, or export a cookies.txt file from {b} and choose it here."))
+    } else if lower.contains("netscape") || lower.contains("cookiefile") || (lower.contains("cookies") && lower.contains("no such file")) {
+        Some("That cookies file couldn't be read. It needs to be a cookies.txt export in Netscape format.".into())
+    } else {
+        None
+    }
+}
+
 pub fn humanize(stderr: &str) -> String {
+    if let Some(c) = cookie_error(stderr) {
+        return c;
+    }
     let err = stderr
         .lines()
         .rev()
@@ -418,9 +456,18 @@ pub fn base_args(settings: &Settings, tools: &Tools) -> Vec<String> {
         args.push("--ffmpeg-location".into());
         args.push(ff.to_string_lossy().into_owned());
     }
-    if !settings.cookies_browser.trim().is_empty() {
-        args.push("--cookies-from-browser".into());
-        args.push(settings.cookies_browser.trim().into());
+    match settings.cookies_browser.trim() {
+        "" => {}
+        "file" => {
+            if !settings.cookies_file.trim().is_empty() {
+                args.push("--cookies".into());
+                args.push(settings.cookies_file.trim().into());
+            }
+        }
+        browser => {
+            args.push("--cookies-from-browser".into());
+            args.push(browser.into());
+        }
     }
     if !settings.proxy.trim().is_empty() {
         args.push("--proxy".into());
@@ -504,7 +551,17 @@ impl Prober {
         args.extend(["-J", "--flat-playlist", "--", link].map(String::from));
         let v = run_json(&tools, args).await?;
         let id = format!("c{}", NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst));
-        let collection = collection_from(&v, id.clone(), link);
+        let mut collection = collection_from(&v, id.clone(), link);
+        if crate::direct::is_direct(&v) {
+            if let Some(entry) = collection.entries.first_mut() {
+                crate::direct::enrich(&tools, settings, &v, entry).await?;
+                collection.title = entry.title.clone();
+                collection.artist = entry.artist.clone();
+                collection.thumbnail = entry.thumbnail.clone();
+                collection.platform = entry.platform.clone();
+                collection.year = entry.year;
+            }
+        }
         if collection.enriching {
             self.enrich(app.clone(), settings.clone(), tools, collection.clone(), v);
         }
@@ -533,7 +590,12 @@ impl Prober {
         let tools = engine::locate(&settings.ytdlp_path, &settings.ffmpeg_path)?;
         let mut args = base_args(settings, &tools);
         args.extend(["-J", "--no-playlist", "--", url].map(String::from));
-        Ok(entry_from_info(&run_json(&tools, args).await?, index))
+        let v = run_json(&tools, args).await?;
+        let mut entry = entry_from_info(&v, index);
+        if crate::direct::is_direct(&v) {
+            crate::direct::enrich(&tools, settings, &v, &mut entry).await?;
+        }
+        Ok(entry)
     }
 
     pub fn cancel(&self, id: &str) {
@@ -671,5 +733,62 @@ mod tests {
     fn humanizes_errors() {
         assert!(humanize("ERROR: Unsupported URL: https://x").contains("isn't supported"));
         assert!(humanize("ERROR: [youtube] abc: Private video. Sign in").contains("browser sign-in"));
+    }
+}
+
+pub fn count_cookie_lines(text: &str) -> usize {
+    text.lines()
+        .map(|l| l.strip_prefix("#HttpOnly_").unwrap_or(l))
+        .filter(|l| !l.starts_with('#') && l.split('\t').count() == 7)
+        .count()
+}
+
+pub async fn check_signin(settings: &Settings) -> Result<String> {
+    match settings.cookies_browser.trim() {
+        "" => bail!("Choose a browser or a cookies file first."),
+        "file" => {
+            let path = settings.cookies_file.trim();
+            if path.is_empty() {
+                bail!("Choose your cookies.txt file first.");
+            }
+            let text = tokio::fs::read_to_string(path).await.map_err(|_| anyhow!("That cookies file couldn't be opened."))?;
+            match count_cookie_lines(&text) {
+                0 => bail!("That file has no cookies in it. Export a cookies.txt file in Netscape format while you're signed in."),
+                n => Ok(format!("Found {n} cookies in that file. You're set.")),
+            }
+        }
+        browser => {
+            let tools = engine::locate(&settings.ytdlp_path, &settings.ffmpeg_path)?;
+            let mut args = base_args(settings, &tools);
+            args.extend(["--simulate", "--no-playlist", "--", "https://example.com/"].map(String::from));
+            let run = engine::command(&tools.ytdlp).args(&args).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true).output();
+            let out = tokio::time::timeout(std::time::Duration::from_secs(60), run).await.map_err(|_| anyhow!("Checking took too long. Try again."))??;
+            let err = String::from_utf8_lossy(&out.stderr);
+            static OK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)extracted (\d+) cookies from").unwrap());
+            if let Some(c) = OK.captures(&err) {
+                return Ok(format!("Read your {} sign-in ({} cookies). You're set.", browser_label(browser), &c[1]));
+            }
+            bail!(cookie_error(&err).unwrap_or_else(|| format!("Couldn't read the {} sign-in. {}", browser_label(browser), humanize(&err))))
+        }
+    }
+}
+
+#[cfg(test)]
+mod signin_tests {
+    use super::*;
+
+    #[test]
+    fn explains_locked_and_encrypted_browsers() {
+        let locked = "Extracting cookies from brave\nERROR: Could not copy Chrome cookie database. See https://github.com/yt-dlp/yt-dlp/issues/7271";
+        assert!(humanize(locked).starts_with("Brave keeps its sign-in locked"));
+        let enc = "Extracting cookies from chrome\nERROR: Failed to decrypt with DPAPI";
+        assert!(cookie_error(enc).unwrap().starts_with("Chrome encrypts"));
+        assert!(cookie_error("ERROR: Unsupported URL").is_none());
+    }
+
+    #[test]
+    fn counts_netscape_cookie_lines() {
+        let t = "# Netscape HTTP Cookie File\n.example.com\tTRUE\t/\tTRUE\t0\ta\tb\n#HttpOnly_.x.com\tTRUE\t/\tTRUE\t0\tc\td\nnot a cookie";
+        assert_eq!(count_cookie_lines(t), 2);
     }
 }

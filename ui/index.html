@@ -97,6 +97,7 @@
               <li><span class="i" data-icon="music"></span><div><strong>A track or video</strong><span>Saved as one file, with its cover and details.</span></div></li>
               <li><span class="i" data-icon="disc"></span><div><strong>An album, EP or playlist</strong><span>Detected, numbered in order, kept in one folder.</span></div></li>
               <li><span class="i" data-icon="user-circle"></span><div><strong>A profile or channel</strong><span>Every upload, listed so you can pick.</span></div></li>
+              <li><span class="i" data-icon="file-music"></span><div><strong>A direct file link</strong><span>Links ending in .mp3, .wav, .flac, .mp4 and more, checked and read for their real quality and tags.</span></div></li>
             </ul>
             <p class="hint">Tip: drag a link onto this window, or press <kbd>Ctrl V</kbd> anywhere.</p>
           </div>
@@ -195,6 +196,7 @@
             <div class="group" id="lyricsProviders"></div>
             <div class="group gap-top">
               <div class="setting"><div><strong>Musixmatch API key</strong><span>A developer API key from developer.musixmatch.com (free tier available). Stays on this device.</span></div><input class="text" type="password" data-key="musixmatchKey" placeholder="Not set" spellcheck="false" autocomplete="off" /></div>
+              <label class="setting"><div><strong>Soft focus around the current line</strong><span>Blurs synced lyrics more the further they are from what's being sung. Hover any line to read it clearly.</span></div><input type="checkbox" class="switch" id="lyricsBlurToggle" /></label>
               <label class="setting"><div><strong>Save lyrics with downloads</strong><span>Writes a synced .lrc file next to each song you download, when lyrics are found.</span></div><input type="checkbox" class="switch" data-key="lyricsOnDownload" /></label>
             </div>
             <h2 class="sub">Custom sources</h2>
@@ -228,11 +230,27 @@
 
             <h2 id="set-network">Network &amp; sign-in</h2>
             <div class="group">
-              <div class="setting">
-                <div><strong>Use my browser sign-in</strong><span>Lets Atmosphere reach content your account can already see, like your own private uploads. Your sign-in stays in your browser.</span></div>
-                <select data-key="cookiesBrowser">
-                  <option value="">Off</option><option value="chrome">Chrome</option><option value="edge">Edge</option><option value="firefox">Firefox</option><option value="brave">Brave</option><option value="opera">Opera</option><option value="vivaldi">Vivaldi</option>
-                </select>
+              <div class="setting signin">
+                <div><strong>Use my browser sign-in</strong><span>Lets Atmosphere reach content your account can already see, like your own private uploads. Your sign-in stays on this computer.</span><p class="signin-status" id="signinStatus" role="status" hidden></p></div>
+                <div class="signin-ctl">
+                  <select data-key="cookiesBrowser" id="signinSelect">
+                    <option value="">Off</option>
+                    <option value="firefox">Firefox</option>
+                    <option value="chrome">Chrome</option>
+                    <option value="edge">Edge</option>
+                    <option value="brave">Brave</option>
+                    <option value="opera">Opera</option>
+                    <option value="vivaldi">Vivaldi</option>
+                    <option value="chromium" data-os="linux">Chromium</option>
+                    <option value="safari" data-os="mac">Safari</option>
+                    <option value="file">A cookies.txt file</option>
+                  </select>
+                  <button class="btn" id="signinCheck" type="button"><span class="label">Check</span><span class="spin" aria-hidden="true"></span></button>
+                </div>
+              </div>
+              <div class="setting" id="cookiesFileRow" hidden>
+                <div><strong>Cookies file</strong><span id="cookiesFilePath">Export one in Netscape format from a browser you're signed in to, using a cookies.txt extension.</span></div>
+                <button class="btn" id="cookiesFilePick" type="button">Choose file</button>
               </div>
               <div class="setting"><div><strong>Speed limit</strong><span>Blank for no limit. For example <code>2M</code> is 2 MB/s.</span></div><input class="text short" data-key="rateLimit" placeholder="No limit" spellcheck="false" /></div>
               <div class="setting"><div><strong>Proxy</strong><span>For example <code>socks5://127.0.0.1:1080</code></span></div><input class="text" data-key="proxy" placeholder="None" spellcheck="false" /></div>
@@ -250,6 +268,10 @@
             <h2 id="set-storage">Storage</h2>
             <p class="set-note">Temporary files are removed automatically on every launch and exit. Here's everything else Atmosphere keeps.</p>
             <div class="group" id="storageList"></div>
+            <div class="group">
+              <div class="setting"><div><strong>Back up your data</strong><span>Settings, stats and play counts, liked songs, artist photos and download history in one .zip. Your music isn't included and is never touched.</span></div><button class="btn" id="backupBtn" type="button"><span class="label">Back up</span><span class="spin" aria-hidden="true"></span></button></div>
+              <div class="setting"><div><strong>Restore from a backup</strong><span>Replaces your current settings and stats with the backup's, then restarts Atmosphere.</span></div><button class="btn" id="restoreBtn" type="button">Restore</button></div>
+            </div>
 
             <h2 id="set-rights">Your responsibility</h2>
             <div class="group">
@@ -284,6 +306,7 @@
       <button class="icon-btn" id="fxBtn" aria-label="Sound and effects" aria-pressed="false" aria-expanded="false" title="Sound, presets, pitch and tempo"><span class="i" data-icon="adjustments-horizontal"></span></button>
       <button class="icon-btn" id="lyricsBtn" aria-label="Lyrics" aria-pressed="false" title="Lyrics (L)"><span class="i" data-icon="microphone"></span></button>
       <button class="icon-btn" id="queueBtn" aria-label="Queue" aria-pressed="false" title="Queue (Q)"><span class="i" data-icon="list"></span></button>
+      <button class="icon-btn" id="miniBtn" aria-label="Mini player" title="Mini player (P)"><span class="i" data-icon="picture-in-picture"></span></button>
       <button class="icon-btn" id="tvBtn" aria-label="TV mode" title="TV mode (F)"><span class="i" data-icon="device-tv"></span></button>
       <button class="icon-btn" id="muteBtn" aria-label="Mute"></button>
       <input type="range" id="volume" class="range vol" min="0" max="100" value="85" aria-label="Volume" />
@@ -294,6 +317,7 @@
   <aside class="drawer-panel" id="queuePanel" aria-label="Queue" hidden></aside>
   <div class="fx" id="fxPanel" role="dialog" aria-label="Sound and effects" hidden></div>
   <div class="tv" id="tv" hidden></div>
+  <div class="mini" id="mini" hidden></div>
 
   <div class="save-menu" id="saveMenu" role="dialog" aria-label="Save as" hidden></div>
   <div class="menu" id="typeMenu" role="menu" hidden></div>
@@ -334,5 +358,6 @@
   <script src="nowplaying.js"></script>
   <script src="lyrics.js"></script>
   <script src="stats.js"></script>
+  <script src="miniplayer.js"></script>
 </body>
 </html>

@@ -65,9 +65,11 @@ It's built for media you **own or have the rights to keep**, such as your own up
   - **Pitch** (±12 semitones) and **tempo** (0.5×–2×), changed independently, or linked in **Vinyl** mode.
   - An Effects on/off switch for instant comparison.
 - **TV mode** (`F`): full-screen with the cover-art backdrop and big synced lyrics, or a visualizer when there are none. Sends to a second screen when one is connected.
+- **Mini player** (`P`): a small window with optional cover art, a blurred-cover backdrop, a queue you can drag to reorder, and always-on-top.
 
 ### Lyrics
 - Synced line by line, plus **word by word** when the source supports it. Click a line to jump, nudge the timing, and save `.lrc` files.
+- **Soft focus:** lines blur gently the further they are from the one being sung, and hovering any line brings it into focus. You can turn this off in Settings.
 - **Free sources:** no key needed and on by default.
 
   | Source | Key | Notes |
@@ -84,6 +86,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 
 ### Downloads
 - One bar for links and search (YouTube and SoundCloud). Paste anywhere, drag links in, or accept the "Use copied link" offer.
+- **Direct file links** ending in `.mp3`, `.wav`, `.flac`, `.mp4` and similar are checked first to make sure they're real media, then read for their actual bitrate, length, tags and cover art.
 - **Release detection:** Album, EP, Single, LP, Compilation, Mixtape, Playlist, Profile and Channel. This drives track numbering, album tags and folder names.
 - **Save as** describes outcomes:
   - Original file
@@ -96,7 +99,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
   **Bitrates never exceed the source.** Matching codecs are copied rather than re-encoded.
 - Metadata editing per release and per track: composer, ISRC, BPM, key, cover art and trimming.
 - Downloads run in **track order**, with progress, retry, history, and skipping of anything downloaded before.
-- Extras: chapters, subtitles, SponsorBlock, a speed limit, a proxy, and browser sign-in for your own private uploads.
+- Extras: chapters, subtitles, SponsorBlock, a speed limit, a proxy, and sign-in for your own private uploads, either from your browser or from a `cookies.txt` file. **Check** confirms it works and explains what to do if it doesn't. For example, Chromium browsers lock their sign-in while they're open.
 
 ### Stats
 - Week, month, year or all time: listening time, plays, songs, artists, time in the app, a by-day chart, and top songs, artists and albums.
@@ -112,7 +115,9 @@ It's built for media you **own or have the rights to keep**, such as your own up
 ### The app itself
 - **About 8 MB**, native on each OS. Custom title bar and right-click menus throughout. Light and dark themes.
 - **Portable:** `atmosphere.exe` runs from any folder. Put an empty file named `portable` next to it, and all data stays beside it.
-- **Tidy:** temp files are wiped on every launch and exit, and stalled downloads are cleaned up. **Settings → Storage** shows what Atmosphere keeps and lets you clean it up.
+- **Tidy:** temp files and stalled partial downloads are cleared automatically on launch, whenever downloads finish, and on exit. **Settings → Storage** shows what Atmosphere keeps and lets you clean it up.
+- **Back up and restore** your settings, stats, liked songs and artist photos as a single `.zip` from **Settings → Storage**.
+- **Clean uninstall:** the Windows uninstaller keeps your data by default. If you choose to delete it, you're offered a backup first. Your music files are never touched.
 
 ## Get started
 
@@ -161,6 +166,7 @@ cargo tauri build
 | `L` | Lyrics |
 | `Q` | Queue |
 | `F` | TV mode |
+| `P` | Mini player |
 | `Ctrl K` | Link or search bar |
 | `Ctrl F` | Search the current view |
 | `Delete` | Delete the selected songs (with confirmation) |
@@ -187,6 +193,8 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/library.rs`, `src/libcmd.rs` | Library, artwork, folder playlists, stats, the file watcher, and the `atmo://` media protocol |
 | `src/lyrics.rs` | Lyrics providers, LRC and word-timing parsing, cache |
 | `src/storage.rs` | Temp-file cleanup and the Storage report |
+| `src/direct.rs` | Checks and reads direct audio and video file links |
+| `src/backup.rs` | Backup and restore of settings, stats and liked songs |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
 | `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |

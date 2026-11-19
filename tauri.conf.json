@@ -17,7 +17,7 @@
         "minWidth": 900,
         "minHeight": 620,
         "center": true,
-        "backgroundColor": "#0b0d14",
+        "backgroundColor": "#0f1117",
         "dragDropEnabled": false,
         "decorations": false,
         "shadow": true
@@ -54,7 +54,8 @@
         "installerIcon": "icons/icon.ico",
         "headerImage": "installer/nsis-header.bmp",
         "sidebarImage": "installer/nsis-sidebar.bmp",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "installer/hooks.nsh"
       },
       "wix": {
         "bannerPath": "installer/wix-banner.bmp",

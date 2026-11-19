@@ -696,6 +696,41 @@ function renderLibrarySettings() {
     h("button", { class: "btn", disabled: !hidden, onclick: async () => { const n = await invoke("tracks_unhide_all"); toast(`Restoring ${songs(n)}…`, "ok"); } }, "Restore all"));
 }
 
+async function backupNow() {
+  const b = $("#backupBtn");
+  const d = new Date();
+  const name = `Atmosphere backup ${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}.zip`;
+  b.classList.add("loading");
+  b.disabled = true;
+  try {
+    const r = await invoke("backup_save", { name });
+    if (r) toast(`Backed up ${r[1]} items to ${r[0].split(/[\\/]/).pop()}`, "ok");
+  } catch (e) {
+    toast(errText(e), "err");
+  } finally {
+    b.disabled = false;
+    b.classList.remove("loading");
+  }
+}
+
+async function restoreNow() {
+  const path = await invoke("backup_pick").catch(() => null);
+  if (!path) return;
+  const body = h("p", {}, "Your current settings, stats, liked songs and artist photos will be replaced by the ones in ", h("strong", {}, path.split(/[\\/]/).pop()), ". Your music files stay as they are. Atmosphere restarts afterwards.");
+  const ok = await modal("Restore this backup?", body, [{ label: "Cancel", value: false }, { label: "Restore and restart", value: true, primary: true }]);
+  if (!ok) return;
+  try {
+    await invoke("backup_restore", { path });
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+}
+
+function bindBackup() {
+  $("#backupBtn")?.addEventListener("click", backupNow);
+  $("#restoreBtn")?.addEventListener("click", restoreNow);
+}
+
 async function renderStorage() {
   const box = $("#storageList");
   if (!box) return;

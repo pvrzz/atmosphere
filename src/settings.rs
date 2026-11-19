@@ -59,6 +59,7 @@ pub struct Settings {
     pub subtitle_langs: String,
     pub embed_chapters: bool,
     pub cookies_browser: String,
+    pub cookies_file: String,
     pub proxy: String,
     pub rate_limit: String,
     pub ytdlp_path: String,
@@ -98,6 +99,7 @@ impl Default for Settings {
             subtitle_langs: "en".into(),
             embed_chapters: true,
             cookies_browser: String::new(),
+            cookies_file: String::new(),
             proxy: String::new(),
             rate_limit: String::new(),
             ytdlp_path: String::new(),
@@ -135,6 +137,7 @@ pub struct SettingsPatch {
     pub subtitle_langs: Option<String>,
     pub embed_chapters: Option<bool>,
     pub cookies_browser: Option<String>,
+    pub cookies_file: Option<String>,
     pub proxy: Option<String>,
     pub rate_limit: Option<String>,
     pub ytdlp_path: Option<String>,
@@ -171,7 +174,7 @@ impl Settings {
             ($($f:ident),*) => { $( if let Some(v) = p.$f { self.$f = v; } )* };
         }
         set!(save_as, embed_metadata, collection_folders, number_tracks, skip_downloaded, sponsorblock, embed_subtitles, embed_chapters, watch_clipboard);
-        set!(cookies_browser, proxy, rate_limit, ytdlp_path, ffmpeg_path, subtitle_langs, musixmatch_key, playlist_copy, lyrics_on_download, custom_lyrics, fx_presets);
+        set!(cookies_browser, cookies_file, proxy, rate_limit, ytdlp_path, ffmpeg_path, subtitle_langs, musixmatch_key, playlist_copy, lyrics_on_download, custom_lyrics, fx_presets);
         if let Some(v) = p.library_folders {
             let mut seen = std::collections::HashSet::new();
             self.library_folders = v.into_iter().map(|f| f.trim().to_string()).filter(|f| !f.is_empty() && seen.insert(f.clone())).collect();
@@ -211,7 +214,7 @@ impl Settings {
     }
 }
 
-fn path() -> PathBuf {
+pub fn path() -> PathBuf {
     match crate::engine::portable_root() {
         Some(root) => root.join("settings.json"),
         None => dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("atmosphere").join("settings.json"),

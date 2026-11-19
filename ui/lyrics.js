@@ -43,13 +43,26 @@ async function loadLyrics(refresh = false) {
   }
 }
 
+const blurOn = () => {
+  try {
+    return localStorage.getItem("atmo.lyricsBlur") !== "off";
+  } catch {
+    return true;
+  }
+};
+
+function setDepth(box, idx) {
+  $$(".lyr-line", box).forEach((el, i) => el.style.setProperty("--dist", String(Math.min(Math.abs(i - Math.max(idx, -1)) || 0, 4))));
+}
+
 function lyricLines(l, big) {
-  const box = h("div", { class: `lyr ${big ? "big" : ""} ${l.synced ? "synced" : "plain"}` });
+  const box = h("div", { class: `lyr ${big ? "big" : ""} ${l.synced ? "synced" : "plain"} ${l.synced && blurOn() ? "depth" : ""}` });
   l.lines.forEach((line, i) => {
     const el = h("div", { class: "lyr-line", "data-i": i, role: l.synced ? "button" : null, tabindex: l.synced ? "0" : null, onclick: () => line.t != null && Player.seek((line.t - Lyr.offset) / 1000) });
     if (line.words?.length > 1) line.words.forEach((w, j) => el.append(h("span", { class: "w", "data-j": j }, w.text)));
     else el.append(line.text || "· · ·");
     if (line.translation) el.append(h("span", { class: "lyr-tr" }, line.translation));
+    if (l.synced) el.style.setProperty("--dist", String(Math.min(i + 1, 4)));
     box.append(el);
   });
   return box;
@@ -161,6 +174,7 @@ function tick() {
           el.classList.toggle("on", i === idx);
           el.classList.toggle("past", i < idx);
         });
+        if (box.classList.contains("depth")) setDepth(box, idx);
         const cur = box.querySelector(".lyr-line.on");
         if (cur) cur.scrollIntoView({ block: "center", behavior: reduced.matches ? "auto" : "smooth" });
       }
@@ -367,7 +381,20 @@ function renderLyricsSettings() {
   );
 }
 
+function renderBlurSetting() {
+  const sw = $("#lyricsBlurToggle");
+  if (!sw) return;
+  sw.checked = blurOn();
+}
+
 function bindLyrics() {
+  $("#lyricsBlurToggle")?.addEventListener("change", (e) => {
+    try {
+      localStorage.setItem("atmo.lyricsBlur", e.target.checked ? "on" : "off");
+    } catch {}
+    $$(".lyr.synced").forEach((b) => b.classList.toggle("depth", e.target.checked));
+  });
+  renderBlurSetting();
   window.addEventListener("player", (e) => {
     if (e.detail.type === "track") {
       Lyr.offset = 0;

@@ -30,6 +30,7 @@ const SOURCE = { title: "Detected from the title", metadata: "Detected from trac
 const FINAL = new Set(["done", "skipped", "error", "cancelled"]);
 const ACTIVE = new Set(["queued", "preparing", "downloading", "processing", "tagging"]);
 const PLATFORM_ICON = [
+  [/^\S+\.(mp3|wav|flac|m4a|aac|ogg|oga|opus|aiff?|wma|alac|mp4|m4v|mov|webm|mkv)(?:[?#]\S*)?$/i, "file-music", "File link"],
   [/soundcloud\.com|snd\.sc/i, "brand-soundcloud", "SoundCloud"],
   [/youtube\.com|youtu\.be|music\.youtube/i, "brand-youtube", "YouTube"],
   [/bandcamp\.com/i, "brand-bandcamp", "Bandcamp"],
@@ -105,6 +106,12 @@ function applyTheme() {
   const t = state.settings.theme;
   if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
   else delete document.documentElement.dataset.theme;
+  syncFrame();
+}
+
+function syncFrame() {
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--border").trim();
+  if (/^#[0-9a-f]{6}$/i.test(color)) invoke("frame_color", { color }).catch(() => {});
 }
 
 /* window chrome */
@@ -127,6 +134,7 @@ function bindWindow() {
   $("#winMax").addEventListener("click", () => win.toggleMaximize());
   $("#winClose").addEventListener("click", () => win.close());
   win.onResized?.(() => syncMax());
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncFrame);
   window.addEventListener("focus", () => bar.classList.remove("blur"));
   window.addEventListener("blur", () => bar.classList.add("blur"));
   syncMax();
@@ -146,6 +154,8 @@ async function init() {
   bindPlayer();
   bindLibrary();
   bindLyrics();
+  bindBackup();
+  bindMini();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));
@@ -304,6 +314,10 @@ function bindShell() {
       go("get");
       fetchText(text);
     }
+  });
+  document.addEventListener("dragstart", (e) => {
+    const t = e.target;
+    if (t.nodeType !== 1 || (t.getAttribute("draggable") !== "true" && !t.closest?.('[draggable="true"]'))) e.preventDefault();
   });
   document.addEventListener("dragover", (e) => e.preventDefault());
   document.addEventListener("drop", (e) => {
@@ -763,7 +777,7 @@ function sheetBody(c) {
     )
   );
   const list = h("ul", { class: "tracklist", role: "listbox", "aria-label": "Tracks", "aria-multiselectable": "true" });
-  d.entries.forEach((e, i) => list.append(trackRow(c, e, i)));
+  d.entries.forEach((e, i) => list.append(sheetRow(c, e, i)));
   body.append(list);
   if (c.inspected != null) {
     const e = entryOf(c, c.inspected);
@@ -779,7 +793,7 @@ function unavailableNote(entries) {
   return h("span", { class: "warn-note", title: drm ? "If these are your own tracks, enable downloads on them in the platform's track settings, then choose Original file." : "The platform only offers a short preview of these." }, `${parts}, can't be downloaded`);
 }
 
-function trackRow(c, e, i) {
+function sheetRow(c, e, i) {
   const ok = selectable(e);
   const m = finalMeta(c, e);
   const box = h("input", { type: "checkbox", class: "tl-check", disabled: !ok, "aria-label": `Include ${m.title}` });
@@ -1314,6 +1328,7 @@ function bindSettings() {
     const key = el.dataset.key;
     el.addEventListener("change", () => patch({ [key]: el.type === "checkbox" ? el.checked : el.value.trim() }));
   });
+  bindSignin();
   $("#templateInput").addEventListener("input", renderTemplatePreview);
   $("#tokens").replaceChildren(
     ...TOKENS.map((t) =>
@@ -1371,10 +1386,69 @@ function renderSettings() {
   const at = s.rightsAcceptedAt ? new Intl.DateTimeFormat(undefined, { dateStyle: "long" }).format(new Date(s.rightsAcceptedAt * 1000)) : "";
   $("#rightsInfo").textContent = at ? `You confirmed it on ${at}. Withdrawing it cancels downloads and asks again.` : "Not confirmed yet.";
   renderTemplatePreview();
+  renderSignin();
   renderToolSettings();
   renderLibrarySettings();
   renderLyricsSettings();
   renderStorage();
+}
+
+const OS = isMac ? "mac" : /Linux|X11/.test(navigator.userAgent) ? "linux" : "windows";
+
+function signinStatus(text, kind) {
+  const el = $("#signinStatus");
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.dataset.kind = kind || "";
+}
+
+function renderSignin() {
+  const s = state.settings;
+  const sel = $("#signinSelect");
+  if (!s || !sel) return;
+  $$("option[data-os]", sel).forEach((o) => (o.hidden = o.dataset.os !== OS && o.value !== s.cookiesBrowser));
+  const isFile = s.cookiesBrowser === "file";
+  $("#cookiesFileRow").hidden = !isFile;
+  $("#signinCheck").hidden = !s.cookiesBrowser;
+  $("#cookiesFilePath").textContent = s.cookiesFile || "Export one in Netscape format from a browser you're signed in to, using a cookies.txt extension.";
+  $("#cookiesFilePath").title = s.cookiesFile || "";
+}
+
+async function checkSignin() {
+  const b = $("#signinCheck");
+  b.classList.add("loading");
+  b.disabled = true;
+  signinStatus("Checking…", "");
+  try {
+    signinStatus(await invoke("signin_check", { browser: state.settings.cookiesBrowser, file: state.settings.cookiesFile || "" }), "ok");
+  } catch (e) {
+    signinStatus(errText(e), "err");
+  } finally {
+    b.disabled = false;
+    b.classList.remove("loading");
+  }
+}
+
+function bindSignin() {
+  $("#signinSelect")?.addEventListener("change", async (e) => {
+    const v = e.target.value;
+    signinStatus("");
+    await patch({ cookiesBrowser: v });
+    renderSignin();
+    if (v === "file" && !state.settings.cookiesFile) pickCookies();
+    else if (v) checkSignin();
+  });
+  $("#signinCheck")?.addEventListener("click", checkSignin);
+  $("#cookiesFilePick")?.addEventListener("click", pickCookies);
+}
+
+async function pickCookies() {
+  const path = await invoke("pick_cookies_file").catch((e) => (toast(errText(e), "err"), null));
+  if (!path) return;
+  await patch({ cookiesFile: path });
+  renderSignin();
+  checkSignin();
 }
 
 function renderToolSettings() {

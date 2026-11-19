@@ -67,16 +67,14 @@ fn mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_048_576.0)
 }
 
-pub fn report(settings: &Settings, lib: &Snapshot, busy: bool) -> Vec<Item> {
+pub fn report(_settings: &Settings, lib: &Snapshot, busy: bool) -> Vec<Item> {
     let temp = all_files(&temp_root());
-    let stall = if busy { Vec::new() } else { stalled(settings) };
     let orphans = orphan_art(lib);
     let lyrics = all_files(&data_dir().join("lyrics"));
     let art = all_files(&data_dir().join("art"));
     let engine = all_files(&bin_dir());
     vec![
-        Item { id: "temp".into(), label: "Temporary files".into(), detail: "Pieces of downloads in progress. Wiped automatically on launch and exit.".into(), bytes: size(&temp), count: temp.len(), cleanable: !busy },
-        Item { id: "stalled".into(), label: "Stalled partial downloads".into(), detail: if busy { "Checked when no downloads are running.".into() } else { "Unfinished pieces left in your download or playlist folders.".into() }, bytes: size(&stall), count: stall.len(), cleanable: !busy },
+        Item { id: "temp".into(), label: "Temporary files".into(), detail: "Pieces of downloads in progress. Wiped automatically, along with any stalled partial downloads.".into(), bytes: size(&temp), count: temp.len(), cleanable: !busy },
         Item { id: "orphan-art".into(), label: "Unused cover art".into(), detail: "Artwork for songs no longer in your library.".into(), bytes: size(&orphans), count: orphans.len(), cleanable: true },
         Item { id: "lyrics".into(), label: "Lyrics cache".into(), detail: "Lyrics fetched online; they're fetched again when needed.".into(), bytes: size(&lyrics), count: lyrics.len(), cleanable: true },
         Item { id: "art".into(), label: "Cover art in use".into(), detail: format!("Thumbnails for your library ({}).", mb(size(&art).saturating_sub(size(&orphans)))), bytes: size(&art).saturating_sub(size(&orphans)), count: art.len().saturating_sub(orphans.len()), cleanable: false },
@@ -120,6 +118,10 @@ pub fn clean(settings: &Settings, lib: &Snapshot, ids: &[String], busy: bool) ->
         }
     }
     total
+}
+
+pub fn clear_stalled(settings: &Settings) -> (usize, u64) {
+    remove_all(&stalled(settings))
 }
 
 pub fn startup(settings: &Settings) -> (usize, u64) {

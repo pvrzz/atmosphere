@@ -1,6 +1,8 @@
 // atmosphere · main.rs · App entry point: shared state, the rights gate and every command the UI can call.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod backup;
+mod direct;
 mod downloader;
 mod engine;
 mod history;
@@ -280,8 +282,85 @@ fn storage_clean(state: State<'_, AppState>, ids: Vec<String>) -> Cleaned {
 }
 
 #[tauri::command]
+async fn backup_save(app: AppHandle, name: String) -> CmdResult<Option<(String, usize)>> {
+    let a = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = a.dialog().file().set_title("Back up Atmosphere").set_file_name(&name).add_filter("Atmosphere backup", &["zip"]);
+        if let Some(docs) = dirs::document_dir() {
+            d = d.set_directory(docs);
+        }
+        d.blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let p = path.clone();
+    let n = tauri::async_runtime::spawn_blocking(move || backup::create(&p)).await.map_err(|e| e.to_string())?.map_err(err)?;
+    Ok(Some((path.to_string_lossy().into_owned(), n)))
+}
+
+#[tauri::command]
+async fn backup_pick(app: AppHandle) -> CmdResult<Option<String>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().set_title("Restore from a backup").add_filter("Atmosphere backup", &["zip"]).blocking_pick_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+async fn backup_restore(app: AppHandle, state: State<'_, AppState>, path: String) -> CmdResult<()> {
+    if state.dl.busy() {
+        return Err("Wait for downloads to finish before restoring.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || backup::restore(std::path::Path::new(&path))).await.map_err(|e| e.to_string())?.map_err(err)?;
+    app.restart();
+}
+
+fn parse_hex(color: &str) -> Option<(u8, u8, u8)> {
+    let c = color.trim().trim_start_matches('#');
+    if c.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(c, 16).ok()?;
+    Some(((v >> 16) as u8, (v >> 8) as u8, v as u8))
+}
+
+#[tauri::command]
+fn frame_color(window: tauri::WebviewWindow, color: String) {
+    let Some((r, g, b)) = parse_hex(&color) else { return };
+    #[cfg(windows)]
+    if let Ok(hwnd) = window.hwnd() {
+        use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
+        let colorref: u32 = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16);
+        unsafe {
+            DwmSetWindowAttribute(hwnd.0 as _, DWMWA_BORDER_COLOR as _, &colorref as *const u32 as _, 4);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = (window, r, g, b);
+}
+
+#[tauri::command]
 fn startup_cleanup(state: State<'_, AppState>) -> Option<Cleaned> {
     state.startup_cleanup.lock().unwrap().take().filter(|(n, _)| *n > 0).map(|(files, bytes)| Cleaned { files, bytes })
+}
+
+#[tauri::command]
+async fn signin_check(state: State<'_, AppState>, browser: String, file: String) -> CmdResult<String> {
+    let mut s = state.snapshot();
+    s.cookies_browser = browser;
+    s.cookies_file = file;
+    media::check_signin(&s).await.map_err(err)
+}
+
+#[tauri::command]
+async fn pick_cookies_file(app: AppHandle) -> CmdResult<Option<String>> {
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_title("Choose a cookies.txt file").add_filter("Cookies", &["txt"]).blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(picked.and_then(|p| p.into_path().ok()).map(|p| p.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -320,6 +399,14 @@ fn read_clipboard(app: AppHandle, state: State<'_, AppState>) -> Option<String> 
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if let Some(i) = args.iter().position(|a| a == "--backup") {
+        let code = match args.get(i + 1) {
+            Some(dest) => i32::from(backup::create(std::path::Path::new(dest)).is_err()),
+            None => 2,
+        };
+        std::process::exit(code);
+    }
     let settings = Arc::new(Mutex::new(settings::load()));
     let http = reqwest::Client::builder()
         .user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION")))
@@ -347,6 +434,12 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            signin_check,
+            frame_color,
+            backup_save,
+            backup_pick,
+            backup_restore,
+            pick_cookies_file,
             get_settings,
             accept_rights,
             revoke_rights,
@@ -409,6 +502,7 @@ fn main() {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.dl.cancel_all();
+                    storage::clear_stalled(&state.snapshot());
                 }
                 storage::wipe_temp();
             }

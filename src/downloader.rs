@@ -204,7 +204,15 @@ impl Downloader {
                     Err(e) => job.emit("error", Some(format!("{e:#}")), None),
                 }
                 this.flags.lock().unwrap().remove(&p.id);
-                this.queue.lock().unwrap().running -= 1;
+                let idle = {
+                    let mut q = this.queue.lock().unwrap();
+                    q.running -= 1;
+                    q.running == 0 && q.pending.is_empty()
+                };
+                if idle {
+                    let s = this.settings.lock().unwrap().clone();
+                    let _ = tauri::async_runtime::spawn_blocking(move || crate::storage::clear_stalled(&s)).await;
+                }
                 this.pump();
             });
         }
@@ -758,8 +766,7 @@ mod tests {
 
     #[test]
     fn builds_stems_and_escapes_templates() {
-        let mut settings = Settings::default();
-        settings.output_dir = "out".into();
+        let settings = Settings { output_dir: "out".into(), ..Default::default() };
         let meta = TagFields { title: "100% Night".into(), track_number: Some(3), track_total: Some(120), ..Default::default() };
         let req = JobRequest { entry: entry(None, false, vec![]), meta, folder: Some("Nova - Glass: Vol 1".into()), trim: None, playlist: None };
         let stem = file_stem(&settings, &req);

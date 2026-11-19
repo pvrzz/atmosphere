@@ -82,6 +82,10 @@ fn resolve(custom: &str, name: &str) -> (Option<PathBuf>, bool) {
     (on_path(name), false)
 }
 
+pub fn find_tool(name: &str) -> Option<PathBuf> {
+    resolve("", name).0
+}
+
 pub fn command(program: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.stdin(Stdio::null()).env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");

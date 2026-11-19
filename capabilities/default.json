@@ -19,6 +19,8 @@
     "core:window:allow-available-monitors",
     "core:window:allow-current-monitor",
     "core:window:allow-maximize",
-    "core:window:allow-unmaximize"
+    "core:window:allow-unmaximize",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-min-size"
   ]
 }

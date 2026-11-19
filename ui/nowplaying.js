@@ -315,6 +315,7 @@ function bindPlayer() {
     if (e.target.closest("input, textarea, select, [contenteditable]") || e.altKey) return;
     const mod = e.ctrlKey || e.metaKey;
     const k = e.key;
+    if (document.body.classList.contains("mini-mode") && /^[lqf]$/i.test(k)) return;
     if (k === " " && !mod) { e.preventDefault(); Player.toggle(); }
     else if (k === "ArrowRight" && mod) { e.preventDefault(); Player.next(); }
     else if (k === "ArrowLeft" && mod) { e.preventDefault(); Player.prev(); }

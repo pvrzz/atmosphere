@@ -42,5 +42,8 @@ url = "2.5.8"
 walkdir = "2.5.0"
 zip = { version = "9.7.0", default-features = false, features = ["deflate"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
+
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }
