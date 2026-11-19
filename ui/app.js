@@ -628,8 +628,22 @@ function finalMeta(c, e) {
 
 function folderFor(c) {
   if (c.data.single || c.releaseType === "search") return null;
-  if (isRelease(c)) return [c.album.artist, c.album.title].filter(Boolean).join(" - ");
-  return c.album.title;
+  return c.album.title || null;
+}
+
+function kindFor(c) {
+  if (c.data.single || c.releaseType === "search") return "track";
+  return isRelease(c) ? "album" : "playlist";
+}
+
+function destFor(c) {
+  const s = state.settings;
+  const sep = s.outputDir.includes("/") ? "/" : "\\";
+  const folder = s.collectionFolders ? folderFor(c) : null;
+  const kind = kindFor(c);
+  if (folder && kind === "album") return [s.outputDir, "Albums", folder].join(sep);
+  if (folder && kind === "playlist") return [s.playlistsDir || [s.outputDir, "Playlists"].join(sep), folder].join(sep);
+  return [s.outputDir, "Tracks"].join(sep);
 }
 
 function selectedEntries(c) {
@@ -1214,7 +1228,7 @@ function updateCommit() {
   sel.replaceChildren(h("option", { value: "" }, "No playlist"), ...lists.map((p) => h("option", { value: p.name }, `+ ${p.name}`)));
   sel.value = lists.some((p) => p.name === keep) ? keep : "";
   sel.hidden = lists.length === 0;
-  $("#destPath").textContent = folder ? `${state.settings.outputDir}${sep}${folder}` : state.settings.outputDir;
+  $("#destPath").textContent = destFor(c);
   $("#attestText").textContent = n > 1 ? `I have the rights to these ${n}` : "I have the rights to this";
   const btn = $("#downloadBtn");
   btn.disabled = n === 0 || !state.tools?.ytdlp.path;
@@ -1237,7 +1251,8 @@ async function startDownload() {
   const ents = selectedEntries(c);
   const folder = state.settings.collectionFolders ? folderFor(c) : null;
   const playlist = $("#destPlaylist").value || null;
-  const jobs = ents.map((e) => ({ entry: e, meta: finalMeta(c, e), folder, trim: c.trims.get(e.index) || null, playlist }));
+  const kind = kindFor(c);
+  const jobs = ents.map((e) => ({ entry: e, meta: finalMeta(c, e), folder, trim: c.trims.get(e.index) || null, playlist, kind }));
   const s = state.settings;
   try {
     const ids = await invoke("enqueue", { jobs, save: { saveAs: s.saveAs, mp3Bitrate: s.mp3Bitrate, videoHeight: s.videoHeight, videoContainer: s.videoContainer }, attested: true });

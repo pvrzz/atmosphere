@@ -39,6 +39,8 @@ pub struct JobRequest {
     pub trim: Option<Trim>,
     #[serde(default)]
     pub playlist: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -654,11 +656,17 @@ async fn cleanup(dir: &Path, stem: &str) {
     }
 }
 
-fn target_dir(settings: &Settings, req: &JobRequest) -> PathBuf {
+pub fn target_dir(settings: &Settings, req: &JobRequest) -> PathBuf {
     let base = PathBuf::from(&settings.output_dir);
-    match (&req.folder, settings.collection_folders) {
-        (Some(name), true) if !name.trim().is_empty() => base.join(sanitize(name)),
-        _ => base,
+    let named = req.folder.as_deref().map(str::trim).filter(|n| !n.is_empty() && settings.collection_folders);
+    match (req.kind.as_deref(), named) {
+        (Some("album"), Some(name)) => base.join("Albums").join(sanitize(name)),
+        (Some("playlist"), Some(name)) => {
+            let lists = PathBuf::from(&settings.playlists_dir);
+            if settings.playlists_dir.trim().is_empty() { base.join("Playlists") } else { lists }.join(sanitize(name))
+        }
+        (None, Some(name)) => base.join(sanitize(name)),
+        _ => base.join("Tracks"),
     }
 }
 
@@ -765,10 +773,21 @@ mod tests {
     }
 
     #[test]
+    fn sorts_downloads_into_albums_playlists_and_tracks() {
+        let settings = Settings { output_dir: "M".into(), playlists_dir: "M/Playlists".into(), collection_folders: true, ..Default::default() };
+        let req = |kind: Option<&str>, folder: Option<&str>| JobRequest { entry: entry(None, false, vec![]), meta: TagFields::default(), folder: folder.map(String::from), trim: None, playlist: None, kind: kind.map(String::from) };
+        assert_eq!(target_dir(&settings, &req(Some("album"), Some("Luxury"))), PathBuf::from("M").join("Albums").join("Luxury"));
+        assert_eq!(target_dir(&settings, &req(Some("playlist"), Some("Late night"))), PathBuf::from("M/Playlists").join("Late night"));
+        assert_eq!(target_dir(&settings, &req(Some("track"), None)), PathBuf::from("M").join("Tracks"));
+        let flat = Settings { collection_folders: false, ..settings.clone() };
+        assert_eq!(target_dir(&flat, &req(Some("album"), Some("Luxury"))), PathBuf::from("M").join("Tracks"));
+    }
+
+    #[test]
     fn builds_stems_and_escapes_templates() {
         let settings = Settings { output_dir: "out".into(), ..Default::default() };
         let meta = TagFields { title: "100% Night".into(), track_number: Some(3), track_total: Some(120), ..Default::default() };
-        let req = JobRequest { entry: entry(None, false, vec![]), meta, folder: Some("Nova - Glass: Vol 1".into()), trim: None, playlist: None };
+        let req = JobRequest { entry: entry(None, false, vec![]), meta, folder: Some("Nova - Glass: Vol 1".into()), trim: None, playlist: None, kind: None };
         let stem = file_stem(&settings, &req);
         assert_eq!(stem, "003 - Nova - 100% Night");
         assert_eq!(template_escape(&stem), "003 - Nova - 100%% Night");
