@@ -173,8 +173,10 @@ cargo tauri build
 | `L` | Lyrics |
 | `Q` | Queue |
 | `F` | TV mode |
+| `Ctrl K` | Search your library, or paste a link |
+| `Ctrl L` | Get: the link and online search bar |
+| `Ctrl B` | Collapse or expand the sidebar |
 | `P` | Mini player |
-| `Ctrl K` | Link or search bar |
 | `Ctrl F` | Search the current view |
 | `Delete` | Delete the selected songs (with confirmation) |
 | `Ctrl A` | Select all in the current list |

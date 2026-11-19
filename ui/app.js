@@ -239,6 +239,7 @@ async function init() {
   bindConnect();
   bindUpdates();
   bindPlaybackSettings();
+  bindSearch();
   bindStats();
   await listen("atmosphere://job", (e) => onJob(e.payload));
   await listen("atmosphere://probe", (e) => onProbe(e.payload));
@@ -435,7 +436,10 @@ function go(view) {
 
 function onKey(e) {
   const mod = e.ctrlKey || e.metaKey;
-  if (mod && (e.key === "k" || e.key === "l")) {
+  if (mod && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    openSearch();
+  } else if (mod && e.key.toLowerCase() === "l") {
     e.preventDefault();
     go("get");
     $("#commandInput").focus();
