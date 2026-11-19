@@ -548,6 +548,8 @@ fn main() {
             libcmd::track_loudness,
             libcmd::tracks_edit,
             libcmd::open_files,
+            libcmd::folder_report,
+            libcmd::move_music,
             libcmd::startup_files,
             libcmd::import_file,
             libcmd::artist_fetch,

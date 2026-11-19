@@ -729,3 +729,139 @@ pub async fn artist_apply(state: State<'_, AppState>, name: String, photo: Optio
     }
     Ok(state.library.apply_artist_info(&name, found, true))
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderReport {
+    files: usize,
+    bytes: u64,
+}
+
+#[tauri::command]
+pub async fn folder_report(path: String) -> FolderReport {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut files = 0;
+        let mut bytes = 0;
+        for e in walkdir::WalkDir::new(&path).into_iter().flatten().filter(|e| e.file_type().is_file()) {
+            files += 1;
+            bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+        FolderReport { files, bytes }
+    })
+    .await
+    .unwrap_or(FolderReport { files: 0, bytes: 0 })
+}
+
+fn move_one(src: &Path, dest: &Path) -> std::io::Result<()> {
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if std::fs::rename(src, dest).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(src, dest)?;
+    std::fs::remove_file(src)
+}
+
+pub fn move_tree(from: &Path, to: &Path, mut progress: impl FnMut(usize, usize)) -> (usize, Vec<String>) {
+    let files: Vec<PathBuf> = walkdir::WalkDir::new(from).into_iter().flatten().filter(|e| e.file_type().is_file()).map(|e| e.into_path()).collect();
+    let total = files.len();
+    let mut moved = 0;
+    let mut failed = Vec::new();
+    for (i, src) in files.iter().enumerate() {
+        let Ok(rel) = src.strip_prefix(from) else { continue };
+        let mut dest = to.join(rel);
+        if dest.exists() {
+            let same = std::fs::metadata(&dest).ok().map(|m| m.len()) == std::fs::metadata(src).ok().map(|m| m.len());
+            if same {
+                if std::fs::remove_file(src).is_ok() {
+                    moved += 1;
+                }
+                progress(i + 1, total);
+                continue;
+            }
+            let stem = dest.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+            let ext = dest.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let mut n = 2;
+            while dest.exists() {
+                dest = dest.with_file_name(format!("{stem} ({n}){ext}"));
+                n += 1;
+            }
+        }
+        match move_one(src, &dest) {
+            Ok(()) => moved += 1,
+            Err(e) => failed.push(format!("{} ({e})", rel.display())),
+        }
+        if i % 10 == 0 || i + 1 == total {
+            progress(i + 1, total);
+        }
+    }
+    let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(from).into_iter().flatten().filter(|e| e.file_type().is_dir()).map(|e| e.into_path()).collect();
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs {
+        let _ = std::fs::remove_dir(d);
+    }
+    (moved, failed)
+}
+
+#[tauri::command]
+pub async fn move_music(app: AppHandle, state: State<'_, AppState>, to: String) -> CmdResult<serde_json::Value> {
+    if state.dl.busy() {
+        return Err("Wait for downloads to finish before moving your music.".into());
+    }
+    let s = state.snapshot();
+    let from = PathBuf::from(&s.output_dir);
+    let dest = PathBuf::from(&to);
+    if dest.starts_with(&from) || from.starts_with(&dest) {
+        return Err("Choose a folder that isn't inside the current one (or the other way round).".into());
+    }
+    std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+    let emitter = app.clone();
+    let (f2, d2) = (from.clone(), dest.clone());
+    let (moved, failed) = tauri::async_runtime::spawn_blocking(move || {
+        move_tree(&f2, &d2, |done, total| {
+            let _ = emitter.emit("atmosphere://move", serde_json::json!({ "done": done, "total": total }));
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    state.library.remap_paths(&from, &dest);
+    let remap = |p: &str| -> String { Path::new(p).strip_prefix(&from).map(|r| dest.join(r).to_string_lossy().into_owned()).unwrap_or_else(|_| p.to_string()) };
+    let view = state.update(|st| {
+        st.output_dir = dest.to_string_lossy().into_owned();
+        st.playlists_dir = remap(&st.playlists_dir);
+        let mut seen = std::collections::HashSet::new();
+        st.library_folders = st.library_folders.iter().map(|f| remap(f)).filter(|f| seen.insert(f.clone())).collect();
+    })?;
+    spawn_scan(app.clone());
+    start_watch(app.clone());
+    changed(&app);
+    Ok(serde_json::json!({ "moved": moved, "failed": failed, "outputDir": view.output_dir }))
+}
+
+#[cfg(test)]
+mod move_tests {
+    use super::*;
+
+    #[test]
+    fn moves_a_tree_and_keeps_both_on_name_clashes() {
+        let root = std::env::temp_dir().join(format!("atmo-move-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (a, b) = (root.join("old"), root.join("new"));
+        std::fs::create_dir_all(a.join("Albums").join("X")).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(a.join("Albums").join("X").join("1.mp3"), b"one").unwrap();
+        std::fs::write(a.join("same.mp3"), b"same").unwrap();
+        std::fs::write(b.join("same.mp3"), b"same").unwrap();
+        std::fs::write(a.join("clash.mp3"), b"mine").unwrap();
+        std::fs::write(b.join("clash.mp3"), b"theirs!").unwrap();
+        let (moved, failed) = move_tree(&a, &b, |_, _| {});
+        assert!(failed.is_empty());
+        assert_eq!(moved, 3);
+        assert!(b.join("Albums").join("X").join("1.mp3").exists());
+        assert_eq!(std::fs::read(b.join("clash (2).mp3")).unwrap(), b"mine");
+        assert_eq!(std::fs::read(b.join("clash.mp3")).unwrap(), b"theirs!");
+        assert!(!a.join("Albums").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

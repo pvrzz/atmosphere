@@ -932,6 +932,58 @@ impl Library {
         Ok(())
     }
 
+    pub fn remap_paths(&self, from: &Path, to: &Path) -> usize {
+        let mut moved: HashMap<String, String> = HashMap::new();
+        {
+            let mut tracks = self.tracks.write().unwrap();
+            let old: Vec<Track> = tracks.values().filter(|t| Path::new(&t.path).starts_with(from)).cloned().collect();
+            for mut t in old {
+                let Ok(rel) = Path::new(&t.path).strip_prefix(from).map(Path::to_path_buf) else { continue };
+                let new_path = to.join(rel).to_string_lossy().into_owned();
+                let new_id = hash(&new_path);
+                tracks.remove(&t.id);
+                moved.insert(t.id.clone(), new_id.clone());
+                t.path = new_path;
+                t.id = new_id;
+                tracks.insert(t.id.clone(), t);
+            }
+        }
+        if moved.is_empty() {
+            return 0;
+        }
+        {
+            let mut s = self.stats.write().unwrap();
+            let remap = |id: &String| moved.get(id).cloned().unwrap_or_else(|| id.clone());
+            s.plays = s.plays.drain().map(|(k, v)| (remap(&k), v)).collect();
+            s.last_played = s.last_played.drain().map(|(k, v)| (remap(&k), v)).collect();
+            s.liked = s.liked.drain().map(|k| remap(&k)).collect();
+            for l in s.listens.iter_mut() {
+                l.id = remap(&l.id);
+            }
+            store("stats.json", &*s);
+        }
+        {
+            let mut hidden = self.hidden.write().unwrap();
+            let next: HashSet<String> = hidden
+                .drain()
+                .map(|p| Path::new(&p).strip_prefix(from).map(|r| to.join(r).to_string_lossy().into_owned()).unwrap_or(p))
+                .collect();
+            *hidden = next;
+            store("hidden.json", &*hidden);
+        }
+        {
+            let mut linked = self.linked.write().unwrap();
+            for l in linked.iter_mut() {
+                if let Ok(r) = Path::new(&l.path).strip_prefix(from) {
+                    l.path = to.join(r).to_string_lossy().into_owned();
+                }
+            }
+            store("linked.json", &*linked);
+        }
+        self.persist();
+        moved.len()
+    }
+
     pub fn set_gain(&self, id: &str, gain: f32) {
         let changed = self.tracks.write().unwrap().get_mut(id).map(|t| t.gain_db = Some(gain)).is_some();
         if changed {
@@ -1049,6 +1101,28 @@ mod tests {
         let snap = lib.snapshot(&lists);
         assert!(snap.playlists.iter().all(|p| !p.linked) && snap.tracks.is_empty());
         assert!(moved.join("a.wav").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn moving_the_music_folder_keeps_likes_and_plays() {
+        let root = std::env::temp_dir().join(format!("atmo-remap-{}-{}", std::process::id(), now()));
+        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let (old, new) = (root.join("old"), root.join("new"));
+        wav(&old.join("Albums").join("one.wav"), 2);
+        let lib = Library::load();
+        lib.scan(std::slice::from_ref(&old), &old.join("Playlists"), |_, _| {}).unwrap();
+        let id = lib.snapshot(&old).tracks[0].id.clone();
+        lib.like(&id, true);
+        lib.played(&id);
+        std::fs::create_dir_all(new.join("Albums")).unwrap();
+        std::fs::rename(old.join("Albums").join("one.wav"), new.join("Albums").join("one.wav")).unwrap();
+        assert_eq!(lib.remap_paths(&old, &new), 1);
+        let snap = lib.snapshot(&new);
+        let t = &snap.tracks[0];
+        assert!(t.path.starts_with(&*new.to_string_lossy()));
+        assert!(snap.liked.contains(&t.id));
+        assert_eq!(snap.plays.get(&t.id), Some(&1));
         let _ = std::fs::remove_dir_all(&root);
     }
 

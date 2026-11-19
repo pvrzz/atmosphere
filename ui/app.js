@@ -1151,10 +1151,53 @@ function bindCommit() {
 
 async function chooseFolder() {
   const path = await invoke("pick_folder").catch(() => null);
-  if (!path) return;
-  state.settings = await invoke("save_settings", { patch: { outputDir: path } });
-  updateCommit();
-  renderSettings();
+  const old = state.settings.outputDir;
+  if (!path || path === old) return;
+  const report = await invoke("folder_report", { path: old }).catch(() => ({ files: 0, bytes: 0 }));
+  if (!report.files) {
+    state.settings = await invoke("save_settings", { patch: { outputDir: path } });
+    updateCommit();
+    renderSettings();
+    return;
+  }
+  const body = h("div", { class: "stack" },
+    h("p", {}, `Your current folder has ${plural(report.files, "file")} (${fmtBytes(report.bytes)}).`),
+    h("div", { class: "move-paths" }, h("code", {}, old), icon("arrow-right"), h("code", {}, path)),
+    h("p", { class: "muted small" }, "Moving keeps your play counts, likes, history and playlists. If you keep them where they are, Atmosphere still shows them in your library."));
+  const choice = await modal("Move your music to the new folder?", body, [{ label: "Keep them where they are", value: "keep" }, { label: "Move everything", value: "move", primary: true }]);
+  if (!choice) return;
+  if (choice === "keep") {
+    const folders = [...new Set([...(state.settings.libraryFolders || []), old, path])];
+    state.settings = await invoke("save_settings", { patch: { outputDir: path, libraryFolders: folders } });
+    updateCommit();
+    renderSettings();
+    invoke("library_scan").catch(() => {});
+    return;
+  }
+  const bar = h("div", { class: "update-bar" }, h("span", { class: "update-fill" }));
+  const label = h("p", { class: "muted small" }, "Starting…");
+  const wrap = h("div", { class: "modal-wrap" }, h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": "Moving music" }, h("h2", {}, "Moving your music"), bar, label));
+  document.body.append(wrap);
+  const off = await listen("atmosphere://move", (e) => {
+    const { done, total } = e.payload || {};
+    if (total) {
+      bar.firstChild.style.width = `${((done / total) * 100).toFixed(1)}%`;
+      label.textContent = `${done} of ${plural(total, "file")}`;
+    }
+  });
+  try {
+    const r = await invoke("move_music", { to: path });
+    state.settings = await invoke("get_settings");
+    toast(r.failed.length ? `Moved ${plural(r.moved, "file")}. ${r.failed.length} couldn't be moved and stayed put.` : `Moved ${plural(r.moved, "file")} to the new folder`, r.failed.length ? "err" : "ok");
+    await loadLibrary();
+  } catch (e) {
+    toast(errText(e), "err");
+  } finally {
+    off();
+    wrap.remove();
+    updateCommit();
+    renderSettings();
+  }
 }
 
 function updateCommit() {
