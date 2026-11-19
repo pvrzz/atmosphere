@@ -312,6 +312,29 @@ impl Job {
 
     async fn run(&mut self, settings: &Settings, req: &JobRequest, save: &SaveOptions) -> Result<Option<PathBuf>> {
         self.emit("preparing", None, None);
+        let mut swapped_note = None;
+        let swapped;
+        let req = if settings.prefer_official_audio && !matches!(save.save_as, SaveAs::Video) && req.entry.music_video && req.entry.platform == "YouTube" {
+            let tools = engine::locate(&settings.ytdlp_path, &settings.ffmpeg_path)?;
+            let artist = if req.meta.artist.trim().is_empty() { req.entry.artist.clone() } else { req.meta.artist.clone() };
+            let title = if req.meta.title.trim().is_empty() { req.entry.title.clone() } else { req.meta.title.clone() };
+            match crate::media::find_official_audio(settings, &tools, &artist, &title).await {
+                Some(url) if url != req.entry.url => {
+                    let mut r = req.clone();
+                    r.entry.url = url;
+                    r.entry.media = None;
+                    swapped = r;
+                    swapped_note = Some("Used the official audio upload instead of the music video's sound.".to_string());
+                    &swapped
+                }
+                _ => {
+                    swapped_note = Some("No official audio upload was found, so the music video's sound was saved.".to_string());
+                    req
+                }
+            }
+        } else {
+            req
+        };
         let entry = &req.entry;
         match entry.availability.as_str() {
             "drm" => bail!("This stream is DRM-encrypted, so it was skipped. If it's your own track, turn on downloads for it in the platform's track settings (or enable “Use my browser sign-in”), then choose Original file to get your uploaded master."),
@@ -346,6 +369,7 @@ impl Job {
             }
         };
         let mut notes = plan.notes.clone();
+        notes.extend(swapped_note);
         if settings.embed_metadata {
             self.emit("tagging", None, None);
             if let Err(e) = tagging::apply(&path, &req.meta, &req.entry.url, tools.ffmpeg.as_deref()).await {

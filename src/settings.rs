@@ -49,6 +49,7 @@ pub struct Settings {
     pub video_height: u32,
     pub video_container: String,
     pub video_keep_audio: bool,
+    pub prefer_official_audio: bool,
     pub concurrency: u8,
     pub filename_template: String,
     pub embed_metadata: bool,
@@ -97,6 +98,7 @@ impl Default for Settings {
             video_height: 1080,
             video_container: "mp4".into(),
             video_keep_audio: true,
+            prefer_official_audio: true,
             concurrency: 3,
             filename_template: "{artist} - {title}".into(),
             embed_metadata: true,
@@ -143,6 +145,7 @@ pub struct SettingsPatch {
     pub video_height: Option<u32>,
     pub video_container: Option<String>,
     pub video_keep_audio: Option<bool>,
+    pub prefer_official_audio: Option<bool>,
     pub concurrency: Option<u8>,
     pub filename_template: Option<String>,
     pub embed_metadata: Option<bool>,
@@ -210,7 +213,7 @@ impl Settings {
             ($($f:ident),*) => { $( if let Some(v) = p.$f { self.$f = v; } )* };
         }
         set!(save_as, embed_metadata, collection_folders, number_tracks, skip_downloaded, sponsorblock, embed_subtitles, embed_chapters, watch_clipboard);
-        set!(api_enabled, api_read, api_control, api_links, check_updates, artist_info, video_keep_audio);
+        set!(api_enabled, api_read, api_control, api_links, check_updates, artist_info, video_keep_audio, prefer_official_audio);
         if let Some(p) = p.api_port.filter(|p| *p >= 1024) {
             self.api_port = p;
         }

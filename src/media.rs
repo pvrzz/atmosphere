@@ -53,6 +53,7 @@ pub struct Entry {
     pub availability: String,
     pub media: Option<MediaInfo>,
     pub detailed: bool,
+    pub music_video: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -206,6 +207,38 @@ fn best_thumbnail(v: &Value) -> Option<String> {
 }
 
 static DASH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+[-–—]\s+").unwrap());
+static MUSIC_VIDEO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)(official\s+(music\s+)?video|music\s+video|\bm/?v\b|video\s+oficial|clipe\s+oficial|official\s+visuali[sz]er)").unwrap());
+
+fn same_song(candidate: &str, title: &str) -> bool {
+    let n = |s: &str| crate::artistinfo::norm(&tidy_title(s));
+    let (c, t) = (n(candidate), n(title));
+    !t.is_empty() && (c == t || c.contains(&t))
+}
+
+pub fn pick_official_audio(results: &Value, artist: &str, title: &str) -> Option<String> {
+    let artist_n = crate::artistinfo::norm(artist);
+    let list = results["entries"].as_array()?;
+    let url = |e: &Value| s(&e["url"]).or_else(|| s(&e["webpage_url"]));
+    let topic = list.iter().find(|e| {
+        let ch = s(&e["channel"]).or_else(|| s(&e["uploader"])).unwrap_or_default();
+        ch.ends_with(" - Topic") && crate::artistinfo::norm(ch.trim_end_matches(" - Topic")) == artist_n && s(&e["title"]).is_some_and(|t| same_song(&t, title))
+    });
+    let own = || {
+        list.iter().find(|e| {
+            let ch = tidy_channel(&s(&e["channel"]).or_else(|| s(&e["uploader"])).unwrap_or_default());
+            let t = s(&e["title"]).unwrap_or_default();
+            crate::artistinfo::norm(&ch) == artist_n && Regex::new(r"(?i)\bofficial\s+audio\b").unwrap().is_match(&t) && same_song(&t, title)
+        })
+    };
+    topic.or_else(own).and_then(url)
+}
+
+pub async fn find_official_audio(settings: &Settings, tools: &Tools, artist: &str, title: &str) -> Option<String> {
+    let mut args = base_args(settings, tools);
+    args.extend(["-J".into(), "--flat-playlist".into(), "--".into(), format!("ytsearch8:{artist} {title} official audio")]);
+    let v = run_json(tools, args).await.ok()?;
+    pick_official_audio(&v, artist, title)
+}
 static TITLE_JUNK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\s*[\(\[【][^)\]】]*\b(official|music\s*video|lyrics?|lyric\s*video|visuali[sz]er|audio|video\s*oficial|clipe\s*oficial|mv|m/v|hd|hq|4k|8k|explicit|clean\s*version|full\s*song|premiere)\b[^)\]】]*[\)\]】]").unwrap()
 });
@@ -267,6 +300,7 @@ pub fn entry_from_info(v: &Value, index: u32) -> Entry {
     let raw_artist = s(&v["artist"]).or_else(|| joined(&v["artists"])).or_else(|| s(&v["creator"]));
     let real_artist = raw_artist.as_ref().is_some_and(|a| *a != uploader) && !extractor.to_ascii_lowercase().contains("soundcloud");
     let cleaned = tidy_title(&raw_title);
+    let music_video = MUSIC_VIDEO.is_match(&raw_title) || s(&v["title"]).is_some_and(|t| MUSIC_VIDEO.is_match(&t));
     let (artist, title) = match (real_artist, split_artist_title(&cleaned)) {
         (false, Some((a, t))) => (a, tidy_title(&t)),
         _ => (raw_artist.map(|a| tidy_channel(&a)).unwrap_or_else(|| uploader.clone()), cleaned),
@@ -295,6 +329,7 @@ pub fn entry_from_info(v: &Value, index: u32) -> Entry {
         availability,
         detailed: has_formats,
         media,
+        music_video,
     }
 }
 
@@ -736,6 +771,32 @@ mod tests {
         let big = detail_ranges(101);
         assert_eq!(big.len(), 4);
         assert_eq!(big.last().unwrap().1, 101);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_finds_official_audio() {
+        let tools = engine::locate("", "").unwrap();
+        let url = find_official_audio(&Settings::default(), &tools, "Daft Punk", "Get Lucky").await;
+        assert!(url.is_some_and(|u| u.contains("youtube.com")));
+    }
+
+    #[test]
+    fn prefers_topic_or_the_artists_own_official_audio() {
+        let results = json!({ "entries": [
+            { "title": "Get Lucky - Daft Punk (Audio)", "channel": "Bob", "url": "https://y/bob" },
+            { "title": "Daft Punk - Get Lucky (Official Audio) ft. Pharrell Williams", "channel": "Daft Punk", "url": "https://y/own" },
+            { "title": "Get Lucky", "channel": "Daft Punk - Topic", "url": "https://y/topic" }
+        ]});
+        assert_eq!(pick_official_audio(&results, "Daft Punk", "Get Lucky").as_deref(), Some("https://y/topic"));
+        let no_topic = json!({ "entries": [ results["entries"][0].clone(), results["entries"][1].clone() ] });
+        assert_eq!(pick_official_audio(&no_topic, "Daft Punk", "Get Lucky").as_deref(), Some("https://y/own"));
+        let only_reuploads = json!({ "entries": [ results["entries"][0].clone() ] });
+        assert_eq!(pick_official_audio(&only_reuploads, "Daft Punk", "Get Lucky"), None);
+        let v = json!({ "extractor_key": "Youtube", "id": "9", "title": "Westwood – Eyes (Official Music Video)", "uploader": "Westwood", "formats": [] });
+        assert!(entry_from_info(&v, 1).music_video);
+        let a = json!({ "extractor_key": "Youtube", "id": "8", "title": "Westwood – Eyes (Official Audio)", "uploader": "Westwood", "formats": [] });
+        assert!(!entry_from_info(&a, 1).music_video);
     }
 
     #[test]
