@@ -1,7 +1,7 @@
 # atmosphere · Cargo.toml · Crate manifest and dependencies for the Atmosphere desktop app.
 [package]
 name = "atmosphere"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "A lightweight SoundCloud downloader for content you have the rights to."
 
