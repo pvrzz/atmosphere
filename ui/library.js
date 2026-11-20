@@ -72,6 +72,8 @@ function buildIndexes(snap) {
     a.year ||= t.year;
   }
   for (const a of albums.values()) a.tracks.sort((x, y) => (x.discNo || 1) - (y.discNo || 1) || (x.trackNo || 999) - (y.trackNo || 999) || x.title.localeCompare(y.title));
+  const albumMeta = new Map(Object.values(snap.albums || {}).map((m) => [`${lnorm(m.artist)}|${lnorm(m.title)}`, m]));
+  for (const a of albums.values()) a.meta = albumMeta.get(a.key) || null;
   Lib.albums = albums;
   const metaByName = new Map(Object.values(snap.artists || {}).map((m) => [lnorm(m.name), m]));
   const artists = new Map();
@@ -545,13 +547,56 @@ async function editTracks(tracks, opts = {}) {
   const showPreview = (src) => preview.replaceChildren(src ? h("img", { src, alt: "" }) : h("div", { class: "edit-cover-ph" }, icon("photo")));
   showPreview(currentArt ? artUrl(currentArt) : null);
   const coverNote = h("p", { class: "muted small" }, currentArt ? "Current cover." : tracks.some((t) => t.art) ? "These songs have different covers." : "No cover yet.");
+  const al = opts.album;
+  let ameta = al?.meta || {};
+  const about = al ? h("textarea", { class: "text area", rows: "5", placeholder: `A few lines about this ${kindWord(al)}…` }, ameta.bio || "") : null;
+  const logoBox = h("div", { class: "edit-logo" });
+  const drawLogo = () => logoBox.replaceChildren(ameta.logo ? h("img", { class: `artist-logo ${ameta.logoDark ? "dark" : ""}`, src: artUrl(ameta.logo), alt: "" }) : h("span", { class: "muted small" }, "No logo. The title is shown as text."));
+  const logoAct = (pick) => async () => {
+    try {
+      ameta = await invoke("album_media", { artist: al.artist, title: al.title, kind: "logo", pick });
+      setAlbumMeta(al, ameta);
+      drawLogo();
+    } catch (e) {
+      if (errText(e) !== "cancelled") toast(errText(e), "err");
+    }
+  };
+  const searchFor = (focus) => async () => {
+    const r = await searchAlbumOnline(al, focus);
+    if (!r) return;
+    if (r.cover) {
+      artwork = { kind: "file", path: r.cover.path };
+      showPreview(r.cover.dataUrl);
+      coverNote.textContent = `New cover from ${r.cover.source} for all ${plural(tracks.length, "song")}. It's written into the files when you save.`;
+    }
+    if (r.meta) {
+      ameta = r.meta;
+      about.value = ameta.bio || "";
+      drawLogo();
+    }
+  };
+  const searchOnline = al ? h("button", { class: "btn small", type: "button", onclick: searchFor("cover") }, icon("search"), "Search online…") : null;
   const coverBox = h("div", { class: "edit-cover-row" }, preview, h("div", { class: "stack" },
     h("strong", {}, "Cover art"), coverNote,
-    h("div", { class: "row" },
+    h("div", { class: "row wrap" },
+      searchOnline,
       h("button", { class: "btn small", type: "button", onclick: async () => { const p = await invoke("pick_image").catch((x) => (toast(errText(x), "err"), null)); if (p) { artwork = { kind: "file", path: p.path }; showPreview(p.dataUrl); coverNote.textContent = `New cover for all ${plural(tracks.length, "song")}.`; } } }, "Choose image…"),
       h("button", { class: "btn small ghost", type: "button", onclick: () => { artwork = { kind: "none" }; showPreview(null); coverNote.textContent = "The cover will be removed from every song."; } }, "Remove"))));
-  const ok = await modal(title, h("div", { class: "stack" }, coverBox, grid, h("p", { class: "muted small" }, "Changes are written into each file's tags. Fields you leave untouched aren't changed.")), [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
+  drawLogo();
+  const albumExtras = al ? [
+    h("div", { class: "stack" }, h("strong", {}, "Logo"), logoBox,
+      h("div", { class: "row wrap" }, h("button", { class: "btn small", type: "button", onclick: searchFor("logo") }, icon("search"), "Search online…"), h("button", { class: "btn small", type: "button", onclick: logoAct(true) }, "Choose logo…"), h("button", { class: "btn small ghost", type: "button", onclick: logoAct(false) }, "Remove"))),
+    h("label", { class: "field" }, h("span", {}, "About"), about),
+  ] : [];
+  const ok = await modal(title, h("div", { class: "stack" }, coverBox, grid, ...albumExtras, h("p", { class: "muted small" }, al ? "Cover and fields are written into each file's tags; fields you leave untouched aren't changed. The logo and description stay in Atmosphere." : "Changes are written into each file's tags. Fields you leave untouched aren't changed.")), [{ label: "Cancel", value: false }, { label: "Save", value: true, primary: true }]);
   if (!ok) return;
+  if (al && about.value !== (ameta.bio || "")) {
+    try {
+      setAlbumMeta(al, await invoke("album_update", { artist: al.artist, title: al.title, bio: about.value }));
+    } catch (e) {
+      toast(errText(e), "err");
+    }
+  }
   const meta = { artwork };
   for (const [k, , v] of fields) {
     const nv = inputs[k].value.trim();
@@ -710,6 +755,85 @@ async function searchArtistOnline(ar) {
     toast(errText(e), "err");
     return null;
   }
+}
+
+const creditFor = (url) => (/wikipedia\.org/.test(url || "") ? "From Wikipedia, under CC BY-SA" : /theaudiodb\.com/.test(url || "") ? "From TheAudioDB" : "Source");
+
+const AlbumFetch = { asked: new Set() };
+
+function setAlbumMeta(a, meta) {
+  if (!meta) return;
+  a.meta = meta;
+  const al = Lib.albums.get(a.key);
+  if (al) al.meta = meta;
+  const r = Lib.route;
+  if (state.view === "library" && r.name === "album" && r.id === a.key) renderLib(true);
+}
+
+async function fetchAlbumInfo(a) {
+  if (state.settings?.artistInfo === false || a.meta?.checked || AlbumFetch.asked.has(a.key)) return;
+  AlbumFetch.asked.add(a.key);
+  try {
+    setAlbumMeta(a, await invoke("album_fetch", { artist: a.artist, title: a.title, force: false }));
+  } catch {}
+}
+
+async function searchAlbumOnline(a, focus) {
+  let pick = { cover: null, page: null, logo: null };
+  const input = h("input", { class: "text wide", type: "search", value: `${a.title} ${a.artist}`, "aria-label": "Search for this album", spellcheck: "false" });
+  const covers = h("div", { class: "pick-covers" });
+  const pages = h("div", { class: "pick-pages" });
+  const logos = h("div", { class: "pick-logos" });
+  const logoHead = h("strong", { class: "pick-head" }, "Logos from Wikimedia Commons, Wikidata and TheAudioDB");
+  const status = h("p", { class: "muted small" }, "Searching…");
+  const run = async () => {
+    status.textContent = "Searching…";
+    pick = { cover: null, page: null, logo: null };
+    const r = await invoke("album_choices", { query: input.value, artist: a.artist, title: a.title }).catch((e) => (status.textContent = errText(e), null));
+    if (!r) return;
+    covers.replaceChildren(...r.covers.map((c) => {
+      const el = h("button", { class: "pick-cover", type: "button", title: `${c.title} · ${c.artist} (${c.source})`, onclick: () => { pick.cover = pick.cover === c ? null : c; $$(".pick-cover", covers).forEach((x) => x.classList.toggle("on", x === el && !!pick.cover)); } },
+        h("img", { src: c.thumb, alt: "" }), h("span", {}, c.title), h("small", {}, c.source));
+      return el;
+    }));
+    pages.replaceChildren(...r.pages.map((p) => {
+      const el = h("button", { class: `pick-page ${p.music ? "" : "dim"}`, type: "button", onclick: () => { pick.page = pick.page === p.key ? null : p.key; $$(".pick-page", pages).forEach((x) => x.classList.toggle("on", x === el && !!pick.page)); } },
+        h("strong", {}, p.title), h("span", {}, p.description || "No description"));
+      return el;
+    }));
+    logos.replaceChildren(...(r.logos.length ? r.logos.map((l) => {
+      const el = h("button", { class: "pick-logo", type: "button", title: `${l.name} (${l.source})`, onclick: () => { pick.logo = pick.logo === l ? null : l; $$(".pick-logo", logos).forEach((x) => x.classList.toggle("on", x === el && !!pick.logo)); } },
+        h("img", { src: l.thumb, alt: "" }), h("span", {}, l.name), h("small", {}, l.source));
+      return el;
+    }) : [h("p", { class: "muted small" }, "No logos found for this one. You can still choose your own file.")]));
+    if (focus === "logo") logoHead.scrollIntoView({ block: "start" });
+    status.textContent = r.covers.length || r.pages.length || r.logos.length ? "Pick a cover, a logo, a Wikipedia page for the description, or any mix." : "Nothing found. Try a different spelling.";
+  };
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
+  const body = h("div", { class: "stack" },
+    h("div", { class: "row" }, input, h("button", { class: "btn", type: "button", onclick: run }, icon("search"), "Search")),
+    status,
+    h("strong", { class: "pick-head" }, "Covers from TheAudioDB, Deezer, Apple Music and the Cover Art Archive"), covers,
+    logoHead, logos,
+    h("strong", { class: "pick-head" }, "Wikipedia page (for the description)"), pages);
+  run();
+  const ok = await modal(`Find ${a.title} online`, body, [{ label: "Cancel", value: false }, { label: "Use these", value: true, primary: true }]);
+  if (!ok || (!pick.cover && !pick.page && !pick.logo)) return null;
+  const out = {};
+  try {
+    if (pick.cover) out.cover = { ...(await invoke("album_cover_get", { url: pick.cover.full })), source: pick.cover.source };
+    if (pick.page) {
+      out.meta = await invoke("album_apply", { artist: a.artist, title: a.title, page: pick.page });
+      setAlbumMeta(a, out.meta);
+    }
+    if (pick.logo) {
+      out.meta = await invoke("album_logo_set", { artist: a.artist, title: a.title, url: pick.logo.full });
+      setAlbumMeta(a, out.meta);
+    }
+  } catch (e) {
+    toast(errText(e), "err");
+  }
+  return out.cover || out.meta ? out : null;
 }
 
 async function editArtist(ar) {
@@ -888,20 +1012,26 @@ function albumView(root, key) {
       cover(a.art, "hero-cover", a.title),
       h("div", { class: "hero-meta" },
         h("div", { class: "kind-line" }, h("span", { class: "kind-btn", style: "cursor:default" }, albumKind(a)), a.year ? h("span", {}, String(a.year)) : null, a.tracks[0]?.genre ? h("span", { class: "sep" }, "·") : null, a.tracks[0]?.genre || null),
-        h("h1", { class: "hero-title" }, a.title),
+        a.meta?.logo ? h("h1", { class: "hero-title has-logo" }, h("img", { class: `artist-logo album-logo ${a.meta.logoDark ? "dark" : ""}`, src: artUrl(a.meta.logo), alt: a.title })) : h("h1", { class: "hero-title" }, a.title),
         h("button", { class: "link hero-artist", onclick: () => openLib("artist", lnorm(a.artist)) }, a.artist),
         h("p", { class: "view-sub" }, `${plural(a.tracks.length, "song")} · ${fmtLong(a.duration)}`),
         h("div", { class: "row" }, ...playBtns(a.tracks), h("button", { class: "btn ghost", onclick: (e) => menuAt(e.clientX, e.clientY, playlistItems(a.tracks)()) }, icon("playlist-add"), "Add to playlist"), h("button", { class: "btn ghost", onclick: () => editAlbum(a) }, icon("pencil"), "Edit"))))
   );
   if (Lib.back.length) root.firstChild.prepend(h("button", { class: "icon-btn back on-hero", "aria-label": "Back", onclick: libBack }, icon("arrow-left")));
   const ctx = { hideAlbum: true, hideArtist: !multiArtist, showArtistFor: (t) => lnorm(primaryArtist(t.artist)) !== lnorm(a.artist), numbers: (t, i) => t.trackNo || i + 1 };
-  if (!discs) return root.append(h("div", { class: "pad-x" }, trackList(a.tracks, ctx)));
   const body = h("div", { class: "pad-x" });
-  for (const d of [...new Set(a.tracks.map((t) => t.discNo || 1))]) {
-    body.append(h("h3", { class: "disc" }, icon("disc"), `Disc ${d}`));
-    body.append(trackList(a.tracks.filter((t) => (t.discNo || 1) === d), { ...ctx, list: a.tracks, numbers: (t) => t.trackNo || a.tracks.indexOf(t) + 1 }));
-  }
+  if (!discs) body.append(trackList(a.tracks, ctx));
+  else
+    for (const d of [...new Set(a.tracks.map((t) => t.discNo || 1))]) {
+      body.append(h("h3", { class: "disc" }, icon("disc"), `Disc ${d}`));
+      body.append(trackList(a.tracks.filter((t) => (t.discNo || 1) === d), { ...ctx, list: a.tracks, numbers: (t) => t.trackNo || a.tracks.indexOf(t) + 1 }));
+    }
+  const m = a.meta;
+  body.append(h("section", { class: "about album-about" }, h("h2", { class: "sec" }, "About"),
+    m?.bio ? h("p", { class: "bio" }, m.bio) : h("button", { class: "link muted", onclick: () => editAlbum(a) }, `Add a description for this ${kindWord(a)}`),
+    m?.bio && m?.bioSource ? h("button", { class: "link muted small source", onclick: () => invoke("open_link", { url: m.bioSource }).catch(() => {}) }, creditFor(m.bioSource)) : null));
   root.append(body);
+  fetchAlbumInfo(a);
 }
 
 function artistCard(ar) {
@@ -945,7 +1075,7 @@ function artistView(root, key) {
   if (ar.featured.length) body.append(h("section", {}, h("h2", { class: "sec" }, "Featured on"), h("div", { class: "grid" }, ...ar.featured.map(featuredCard))));
   body.append(h("section", { class: "about" }, h("h2", { class: "sec" }, "About"),
     ar.meta?.bio ? h("p", { class: "bio" }, ar.meta.bio) : h("button", { class: "link muted", onclick: () => editArtist(ar) }, "Add a bio and photo for this artist"),
-    ar.meta?.bio && ar.meta?.bioSource ? h("button", { class: "link muted small source", onclick: () => invoke("open_link", { url: ar.meta.bioSource }).catch(() => {}) }, "From Wikipedia, under CC BY-SA") : null));
+    ar.meta?.bio && ar.meta?.bioSource ? h("button", { class: "link muted small source", onclick: () => invoke("open_link", { url: ar.meta.bioSource }).catch(() => {}) }, creditFor(ar.meta.bioSource)) : null));
   if (!ar.meta?.checked) queueArtistInfo([ar.name], true);
   root.append(body);
 }

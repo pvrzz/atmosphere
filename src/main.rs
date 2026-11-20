@@ -4,6 +4,7 @@
 #[cfg(not(windows))]
 compile_error!("Atmosphere is a Windows app.");
 
+mod albuminfo;
 mod api;
 mod artistinfo;
 mod backup;
@@ -466,7 +467,7 @@ fn main() {
     }
     let settings = Arc::new(Mutex::new(loaded));
     let http = reqwest::Client::builder()
-        .user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION"), " (+https://github.com/pvrzz/atmosphere)"))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(90))
         .build()
@@ -589,6 +590,13 @@ fn main() {
             libcmd::artist_media,
             libcmd::artist_choices,
             libcmd::artist_apply,
+            libcmd::album_fetch,
+            libcmd::album_choices,
+            libcmd::album_apply,
+            libcmd::album_cover_get,
+            libcmd::album_logo_set,
+            libcmd::album_media,
+            libcmd::album_update,
             libcmd::playlist_cover,
             libcmd::playlist_relocate,
             libcmd::playlist_unlink

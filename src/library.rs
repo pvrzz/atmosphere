@@ -81,6 +81,29 @@ pub struct ArtistMeta {
     pub checked: Option<u64>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AlbumMeta {
+    pub artist: String,
+    pub title: String,
+    pub bio: String,
+    pub bio_source: Option<String>,
+    pub logo: Option<String>,
+    pub logo_dark: bool,
+    pub checked: Option<u64>,
+}
+
+pub fn album_key(artist: &str, title: &str) -> String {
+    hash(&format!("{}\u{1f}{}", artist.trim().to_lowercase(), title.trim().to_lowercase()))
+}
+
+fn set_logo(key: &str, meta: &mut AlbumMeta, data: &[u8]) -> Result<()> {
+    let (k, dark) = save_logo(&format!("albumlogouser{key}"), data).ok_or_else(|| anyhow!("That image couldn't be read"))?;
+    meta.logo = Some(k);
+    meta.logo_dark = dark;
+    Ok(())
+}
+
 fn save_logo(key: &str, data: &[u8]) -> Option<(String, bool)> {
     let dir = art_dir();
     std::fs::create_dir_all(&dir).ok()?;
@@ -140,6 +163,7 @@ pub struct Snapshot {
     pub last_played: HashMap<String, u64>,
     pub liked: Vec<String>,
     pub artists: HashMap<String, ArtistMeta>,
+    pub albums: HashMap<String, AlbumMeta>,
     pub scanning: bool,
     pub hidden: usize,
 }
@@ -148,6 +172,7 @@ pub struct Library {
     tracks: RwLock<HashMap<String, Track>>,
     stats: RwLock<Stats>,
     artists: RwLock<HashMap<String, ArtistMeta>>,
+    albums: RwLock<HashMap<String, AlbumMeta>>,
     hidden: RwLock<HashSet<String>>,
     linked: RwLock<Vec<Linked>>,
     opened: RwLock<HashMap<String, Track>>,
@@ -326,6 +351,7 @@ impl Library {
             tracks: RwLock::new(cached.into_iter().map(|t| (t.id.clone(), t)).collect()),
             stats: RwLock::new(load("stats.json")),
             artists: RwLock::new(load("artists.json")),
+            albums: RwLock::new(load("albums.json")),
             hidden: RwLock::new(load("hidden.json")),
             linked: RwLock::new(load("linked.json")),
             opened: RwLock::new(HashMap::new()),
@@ -435,6 +461,7 @@ impl Library {
             last_played: stats.last_played.clone(),
             liked: stats.liked.iter().cloned().collect(),
             artists: self.artists.read().unwrap().clone(),
+            albums: self.albums.read().unwrap().clone(),
             scanning: self.scanning.load(Ordering::SeqCst),
             hidden: self.hidden.read().unwrap().len(),
         }
@@ -942,6 +969,73 @@ impl Library {
         let out = meta.clone();
         store("artists.json", &*artists);
         Ok(out)
+    }
+
+    pub fn album(&self, artist: &str, title: &str) -> Option<AlbumMeta> {
+        self.albums.read().unwrap().get(&album_key(artist, title)).cloned()
+    }
+
+    fn with_album<T>(&self, artist: &str, title: &str, f: impl FnOnce(&str, &mut AlbumMeta) -> Result<T>) -> Result<AlbumMeta> {
+        let key = album_key(artist, title);
+        let mut albums = self.albums.write().unwrap();
+        let meta = albums.entry(key.clone()).or_default();
+        meta.artist = artist.trim().to_string();
+        meta.title = title.trim().to_string();
+        f(&key, meta)?;
+        let out = meta.clone();
+        store("albums.json", &*albums);
+        Ok(out)
+    }
+
+    pub fn apply_album_info(&self, artist: &str, title: &str, found: crate::albuminfo::Found, force: bool) -> AlbumMeta {
+        self.with_album(artist, title, |key, meta| {
+            if let Some(bio) = found.bio.filter(|_| force || meta.bio.trim().is_empty()) {
+                meta.bio = bio;
+                meta.bio_source = found.bio_source;
+            }
+            if let Some(logo) = found.logo.filter(|_| force || meta.logo.is_none()) {
+                if let Some((k, dark)) = save_logo(&format!("albumlogo{key}"), &logo) {
+                    meta.logo = Some(k);
+                    meta.logo_dark = dark;
+                }
+            }
+            meta.checked = Some(now());
+            Ok(())
+        })
+        .unwrap_or_default()
+    }
+
+    pub fn album_media(&self, artist: &str, title: &str, kind: &str, image: Option<&Path>) -> Result<AlbumMeta> {
+        self.with_album(artist, title, |key, meta| {
+            meta.checked.get_or_insert(now());
+            match (kind, image) {
+                ("logo", None) => {
+                    meta.logo = None;
+                    meta.logo_dark = false;
+                }
+                ("logo", Some(src)) => set_logo(key, meta, &std::fs::read(src).context("Couldn't read that image")?)?,
+                _ => bail!("Unknown album field"),
+            }
+            Ok(())
+        })
+    }
+
+    pub fn set_album_logo(&self, artist: &str, title: &str, data: &[u8]) -> Result<AlbumMeta> {
+        self.with_album(artist, title, |key, meta| {
+            meta.checked.get_or_insert(now());
+            set_logo(key, meta, data)
+        })
+    }
+
+    pub fn set_album_bio(&self, artist: &str, title: &str, bio: String) -> Result<AlbumMeta> {
+        self.with_album(artist, title, |_, meta| {
+            if bio.trim() != meta.bio.trim() {
+                meta.bio_source = None;
+            }
+            meta.bio = bio;
+            meta.checked.get_or_insert(now());
+            Ok(())
+        })
     }
 
     pub fn playlist_cover(&self, dir: &Path, name: &str, image: Option<&Path>) -> Result<()> {

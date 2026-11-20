@@ -858,6 +858,84 @@ pub async fn artist_apply(state: State<'_, AppState>, name: String, photo: Optio
     Ok(state.library.apply_artist_info(&name, found, true))
 }
 
+#[tauri::command]
+pub async fn album_fetch(state: State<'_, AppState>, artist: String, title: String, force: bool) -> CmdResult<Option<crate::library::AlbumMeta>> {
+    if title.trim().is_empty() || (!state.snapshot().artist_info && !force) {
+        return Ok(None);
+    }
+    let existing = state.library.album(&artist, &title).unwrap_or_default();
+    if existing.checked.is_some() && !force {
+        return Ok(Some(existing));
+    }
+    let found = crate::albuminfo::find(&state.http, &artist, &title, force || existing.bio.trim().is_empty(), force || existing.logo.is_none()).await;
+    Ok(Some(state.library.apply_album_info(&artist, &title, found, force)))
+}
+
+#[tauri::command]
+pub async fn album_choices(state: State<'_, AppState>, query: String, artist: String, title: String) -> CmdResult<serde_json::Value> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(serde_json::json!({ "covers": [], "pages": [], "logos": [] }));
+    }
+    let ((covers, pages), logos) = tokio::join!(crate::albuminfo::choices(&state.http, q, &artist, &title), crate::albuminfo::logo_choices(&state.http, q, &artist, &title));
+    Ok(serde_json::json!({ "covers": covers, "pages": pages, "logos": logos }))
+}
+
+#[tauri::command]
+pub async fn album_apply(state: State<'_, AppState>, artist: String, title: String, page: String) -> CmdResult<crate::library::AlbumMeta> {
+    let found = crate::albuminfo::chosen(&state.http, &page).await;
+    if found.bio.is_none() && found.logo.is_none() {
+        return Err("Couldn't get anything from that page. Try another one.".into());
+    }
+    Ok(state.library.apply_album_info(&artist, &title, found, true))
+}
+
+#[tauri::command]
+pub async fn album_cover_get(state: State<'_, AppState>, url: String) -> CmdResult<serde_json::Value> {
+    use base64::Engine as _;
+    let bytes = crate::albuminfo::cover(&state.http, &url).await.map_err(err)?;
+    let dir = crate::engine::temp_root().join("covers");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.jpg", crate::library::hash(&url)));
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let data_url = format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes));
+    Ok(serde_json::json!({ "path": path.to_string_lossy(), "dataUrl": data_url }))
+}
+
+#[tauri::command]
+pub async fn album_media(app: AppHandle, state: State<'_, AppState>, artist: String, title: String, kind: String, pick: bool) -> CmdResult<crate::library::AlbumMeta> {
+    let image = if pick {
+        let a = app.clone();
+        let picked = tauri::async_runtime::spawn_blocking(move || a.dialog().file().set_title("Choose a logo (a transparent PNG looks best)").add_filter("Images", &["png", "jpg", "jpeg", "webp"]).blocking_pick_file())
+            .await
+            .map_err(|e| e.to_string())?;
+        match picked.and_then(|p| p.into_path().ok()) {
+            Some(p) => Some(p),
+            None => return Err("cancelled".into()),
+        }
+    } else {
+        None
+    };
+    let meta = state.library.album_media(&artist, &title, &kind, image.as_deref()).map_err(err)?;
+    changed(&app);
+    Ok(meta)
+}
+
+#[tauri::command]
+pub async fn album_logo_set(app: AppHandle, state: State<'_, AppState>, artist: String, title: String, url: String) -> CmdResult<crate::library::AlbumMeta> {
+    let bytes = crate::albuminfo::logo(&state.http, &url).await.map_err(err)?;
+    let meta = state.library.set_album_logo(&artist, &title, &bytes).map_err(err)?;
+    changed(&app);
+    Ok(meta)
+}
+
+#[tauri::command]
+pub fn album_update(app: AppHandle, state: State<'_, AppState>, artist: String, title: String, bio: String) -> CmdResult<crate::library::AlbumMeta> {
+    let meta = state.library.set_album_bio(&artist, &title, bio).map_err(err)?;
+    changed(&app);
+    Ok(meta)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderReport {

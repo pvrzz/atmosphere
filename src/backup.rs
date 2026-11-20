@@ -1,19 +1,24 @@
-// atmosphere · backup.rs · Saves and restores settings, library, stats, liked songs and artist photos as one .zip
+// atmosphere · backup.rs · Saves and restores settings, library, stats, liked songs, artist photos and logos, and album info as one .zip
 use crate::engine::data_dir;
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::Value;
 use std::io::{Read, Write};
 use std::path::Path;
 
-const DATA_FILES: &[&str] = &["library.json", "stats.json", "artists.json", "hidden.json", "history.json", "archive.txt", "linked.json"];
+const DATA_FILES: &[&str] = &["library.json", "stats.json", "artists.json", "albums.json", "hidden.json", "history.json", "archive.txt", "linked.json"];
 const MARKER: &str = "atmosphere-backup.json";
 
-fn artist_photos(data: &Path) -> Vec<String> {
-    let Ok(bytes) = std::fs::read(data.join("artists.json")) else { return Vec::new() };
-    let v: Value = serde_json::from_slice(&bytes).unwrap_or_default();
-    v.as_object()
-        .map(|m| m.values().filter_map(|a| a["image"].as_str().map(|s| format!("{s}.jpg"))).collect())
-        .unwrap_or_default()
+fn saved_art(data: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for file in ["artists.json", "albums.json"] {
+        let Ok(bytes) = std::fs::read(data.join(file)) else { continue };
+        let v: Value = serde_json::from_slice(&bytes).unwrap_or_default();
+        for m in v.as_object().into_iter().flat_map(|m| m.values()) {
+            out.extend(m["image"].as_str().map(|s| format!("{s}.jpg")));
+            out.extend(m["logo"].as_str().map(|s| format!("{s}.png")));
+        }
+    }
+    out
 }
 
 fn safe_name(name: &str) -> bool {
@@ -51,7 +56,7 @@ fn create_from(data: &Path, settings: &Path, dest: &Path) -> Result<usize> {
             count += 1;
         }
     }
-    for photo in artist_photos(data) {
+    for photo in saved_art(data) {
         if let Ok(bytes) = std::fs::read(data.join("art").join(&photo)) {
             put(&mut zip, &format!("art/{photo}"), &bytes)?;
             count += 1;
@@ -79,7 +84,7 @@ fn restore_into(data: &Path, settings: &Path, src: &Path) -> Result<usize> {
             settings.to_path_buf()
         } else if DATA_FILES.contains(&name.as_str()) {
             data.join(&name)
-        } else if let Some(photo) = name.strip_prefix("art/").filter(|p: &&str| !p.contains('/') && p.ends_with(".jpg")) {
+        } else if let Some(photo) = name.strip_prefix("art/").filter(|p: &&str| !p.contains('/') && (p.ends_with(".jpg") || p.ends_with(".png"))) {
             data.join("art").join(photo)
         } else {
             continue;
@@ -105,8 +110,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("art")).unwrap();
         std::fs::write(root.join("stats.json"), br#"{"liked":["a"]}"#).unwrap();
-        std::fs::write(root.join("artists.json"), br#"{"x":{"name":"X","image":"p1"}}"#).unwrap();
+        std::fs::write(root.join("artists.json"), br#"{"x":{"name":"X","image":"p1","logo":"l1"}}"#).unwrap();
+        std::fs::write(root.join("albums.json"), br#"{"y":{"title":"Y","logo":"l2"}}"#).unwrap();
         std::fs::write(root.join("art").join("p1.jpg"), b"jpg").unwrap();
+        std::fs::write(root.join("art").join("l1.png"), b"png").unwrap();
+        std::fs::write(root.join("art").join("l2.png"), b"png").unwrap();
         std::fs::write(root.join("art").join("cover.jpg"), b"thumb").unwrap();
         let zip_path = root.join("b.zip");
         let set = root.join("cfg").join("settings.json");
@@ -116,10 +124,15 @@ mod tests {
         std::fs::remove_file(&set).unwrap();
         std::fs::remove_file(root.join("stats.json")).unwrap();
         std::fs::remove_file(root.join("art").join("p1.jpg")).unwrap();
+        std::fs::remove_file(root.join("art").join("l1.png")).unwrap();
+        std::fs::remove_file(root.join("art").join("l2.png")).unwrap();
+        std::fs::remove_file(root.join("albums.json")).unwrap();
         assert!(restore_into(&root, &set, &zip_path).unwrap() >= 4);
         assert!(set.exists());
         assert_eq!(std::fs::read(root.join("stats.json")).unwrap(), br#"{"liked":["a"]}"#);
         assert!(root.join("art").join("p1.jpg").exists());
+        assert!(root.join("art").join("l1.png").exists() && root.join("art").join("l2.png").exists());
+        assert!(root.join("albums.json").exists());
         std::fs::write(root.join("not.zip"), b"nope").unwrap();
         assert!(restore_into(&root, &set, &root.join("not.zip")).is_err());
         assert!(!safe_name("../x") && !safe_name("C:x") && safe_name("art/p.jpg"));

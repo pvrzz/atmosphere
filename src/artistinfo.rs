@@ -43,7 +43,7 @@ pub(crate) async fn get_json(http: &reqwest::Client, url: &str) -> Option<Value>
     r.json().await.ok()
 }
 
-async fn get_bytes(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
+pub(crate) async fn get_bytes(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
     let r = http.get(url).timeout(Duration::from_secs(20)).send().await.ok()?;
     if !r.status().is_success() || r.content_length().is_some_and(|n| n as usize > MAX_IMAGE) {
         return None;
@@ -56,7 +56,7 @@ pub(crate) fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
-fn path_enc(s: &str) -> String {
+pub(crate) fn path_enc(s: &str) -> String {
     s.replace(' ', "_")
         .bytes()
         .map(|b| if b.is_ascii_alphanumeric() || b"-_.~()".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") })
@@ -95,13 +95,21 @@ async fn wikipedia(http: &reqwest::Client, name: &str) -> Option<(String, String
     Some((extract, url, s["wikibase_item"].as_str().map(String::from)))
 }
 
-async fn wikidata_file(http: &reqwest::Client, qid: &str, prop: &str) -> Option<Vec<u8>> {
+pub(crate) async fn wikidata_file_name(http: &reqwest::Client, qid: &str, prop: &str) -> Option<String> {
     if !qid.starts_with('Q') || !qid[1..].chars().all(|c| c.is_ascii_digit()) {
         return None;
     }
     let v = get_json(http, &format!("https://www.wikidata.org/wiki/Special:EntityData/{qid}.json")).await?;
-    let file = v["entities"][qid]["claims"][prop][0]["mainsnak"]["datavalue"]["value"].as_str()?;
-    get_bytes(http, &format!("https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800", path_enc(file))).await
+    v["entities"][qid]["claims"][prop][0]["mainsnak"]["datavalue"]["value"].as_str().map(String::from)
+}
+
+pub(crate) fn commons_file(file: &str, width: u32) -> String {
+    format!("https://commons.wikimedia.org/wiki/Special:FilePath/{}?width={width}", path_enc(file))
+}
+
+pub(crate) async fn wikidata_file(http: &reqwest::Client, qid: &str, prop: &str) -> Option<Vec<u8>> {
+    let file = wikidata_file_name(http, qid, prop).await?;
+    get_bytes(http, &commons_file(&file, 800)).await
 }
 
 struct AudioDb {
@@ -118,6 +126,10 @@ fn audiodb_entry(a: &Value) -> Option<AudioDb> {
 
 async fn audiodb_search(http: &reqwest::Client, query: &str) -> Vec<Value> {
     get_json(http, &format!("{AUDIODB}/search.php?s={}", enc(query))).await.and_then(|v| v["artists"].as_array().cloned()).unwrap_or_default()
+}
+
+pub(crate) async fn audiodb_logo(http: &reqwest::Client, name: &str) -> Option<String> {
+    audiodb(http, name).await?.logo.filter(|u| allowed_logo(u))
 }
 
 async fn audiodb(http: &reqwest::Client, name: &str) -> Option<AudioDb> {

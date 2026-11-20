@@ -57,7 +57,13 @@ fn stalled(settings: &Settings) -> Vec<PathBuf> {
 }
 
 fn orphan_art(lib: &Snapshot) -> Vec<PathBuf> {
-    let used: HashSet<String> = lib.tracks.iter().filter_map(|t| t.art.clone()).chain(lib.artists.values().filter_map(|a| a.image.clone())).collect();
+    let used: HashSet<String> = lib
+        .tracks
+        .iter()
+        .filter_map(|t| t.art.clone())
+        .chain(lib.artists.values().flat_map(|a| [a.image.clone(), a.logo.clone()]).flatten())
+        .chain(lib.albums.values().filter_map(|a| a.logo.clone()))
+        .collect();
     let mut out = Vec::new();
     walk(&data_dir().join("art"), 0, &mut out, &|p| p.file_stem().and_then(|s| s.to_str()).is_some_and(|s| !used.contains(s)));
     out

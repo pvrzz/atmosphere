@@ -206,12 +206,10 @@ function bindWindow() {
   const api = window.__TAURI__.window;
   if (!api?.getCurrentWindow) return;
   const win = api.getCurrentWindow();
-  const restoreSvg = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5V0.5h7v7h-2" /><rect x="0.5" y="2.5" width="7" height="7" /></svg>';
-  const maxSvg = '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9" /></svg>';
   const syncMax = async () => {
     const maxed = await win.isMaximized().catch(() => false);
     const b = $("#winMax");
-    b.innerHTML = maxed ? restoreSvg : maxSvg;
+    b.firstElementChild.textContent = maxed ? "\uE923" : "\uE922";
     b.setAttribute("aria-label", maxed ? "Restore" : "Maximize");
     b.title = maxed ? "Restore" : "Maximize";
   };
