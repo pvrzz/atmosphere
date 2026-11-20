@@ -655,15 +655,17 @@ function queueLibraryArtists() {
 }
 
 async function searchArtistOnline(ar) {
-  let pick = { photo: null, page: null };
+  let pick = { photo: null, page: null, logo: null };
   const input = h("input", { class: "text wide", type: "search", value: ar.name, "aria-label": "Search for this artist", spellcheck: "false" });
   const photos = h("div", { class: "pick-photos" });
   const pages = h("div", { class: "pick-pages" });
+  const logos = h("div", { class: "pick-logos" });
+  const logoHead = h("strong", { class: "pick-head" }, "Logos from TheAudioDB");
   const status = h("p", { class: "muted small" }, "Searching…");
   const fans = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M fans` : n >= 1e3 ? `${Math.round(n / 1e3)}K fans` : `${n} fans`);
   const run = async () => {
     status.textContent = "Searching…";
-    pick = { photo: null, page: null };
+    pick = { photo: null, page: null, logo: null };
     const r = await invoke("artist_choices", { query: input.value }).catch((e) => (status.textContent = errText(e), null));
     if (!r) return;
     photos.replaceChildren(...r.photos.map((p) => {
@@ -676,19 +678,27 @@ async function searchArtistOnline(ar) {
         h("strong", {}, p.title), h("span", {}, p.description || "No description"));
       return el;
     }));
-    status.textContent = r.photos.length || r.pages.length ? "Pick a photo, a Wikipedia page for the bio and logo, or both." : "Nothing found. Try a different spelling.";
+    const lg = r.logos || [];
+    logos.replaceChildren(...lg.map((l) => {
+      const el = h("button", { class: "pick-logo", type: "button", title: l.name, onclick: () => { pick.logo = pick.logo === l.full ? null : l.full; $$(".pick-logo", logos).forEach((x) => x.classList.toggle("on", x === el && !!pick.logo)); } },
+        h("img", { src: l.thumb, alt: "" }), h("span", {}, l.name));
+      return el;
+    }));
+    logos.hidden = logoHead.hidden = !lg.length;
+    status.textContent = r.photos.length || r.pages.length || lg.length ? "Pick a photo, a logo, a Wikipedia page for the bio, or any mix." : "Nothing found. Try a different spelling.";
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); run(); } });
   const body = h("div", { class: "stack" },
     h("div", { class: "row" }, input, h("button", { class: "btn", type: "button", onclick: run }, icon("search"), "Search")),
     status,
     h("strong", { class: "pick-head" }, "Photos from Deezer"), photos,
-    h("strong", { class: "pick-head" }, "Wikipedia page (bio and logo)"), pages);
+    logoHead, logos,
+    h("strong", { class: "pick-head" }, "Wikipedia page (bio, and a logo if you don't pick one)"), pages);
   run();
   const ok = await modal(`Find ${ar.name} online`, body, [{ label: "Cancel", value: false }, { label: "Use these", value: true, primary: true }]);
-  if (!ok || (!pick.photo && !pick.page)) return null;
+  if (!ok || (!pick.photo && !pick.page && !pick.logo)) return null;
   try {
-    const meta = await invoke("artist_apply", { name: ar.name, photo: pick.photo, page: pick.page });
+    const meta = await invoke("artist_apply", { name: ar.name, photo: pick.photo, page: pick.page, logo: pick.logo });
     setArtistMeta(ar.name, meta);
     toast("Artist updated", "ok");
     return meta;

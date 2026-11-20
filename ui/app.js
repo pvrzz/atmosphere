@@ -238,6 +238,7 @@ async function init() {
   bindMini();
   bindConnect();
   bindUpdates();
+  bindDiscord();
   bindPlaybackSettings();
   bindSearch();
   bindTools();
@@ -1548,6 +1549,7 @@ function renderSettings() {
   renderSignin();
   if (typeof renderPlaybackSettings === "function") renderPlaybackSettings();
   if (typeof renderApiSettings === "function") renderApiSettings();
+  if (typeof renderDiscordSettings === "function") renderDiscordSettings();
   renderToolSettings();
   renderLibrarySettings();
   renderLyricsSettings();

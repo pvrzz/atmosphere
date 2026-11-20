@@ -965,14 +965,26 @@ impl Library {
         Ok(())
     }
 
+    pub fn find_track(&self, f: impl Fn(&Track) -> bool) -> Option<Track> {
+        self.tracks.read().unwrap().values().find(|t| f(t)).cloned()
+    }
+
+    pub fn remap_file(&self, from: &Path, to: &Path) -> Option<String> {
+        self.remap_with(|p| (p == from).then(|| to.to_path_buf()));
+        self.find_track(|t| Path::new(&t.path) == to).map(|t| t.id)
+    }
+
     pub fn remap_paths(&self, from: &Path, to: &Path) -> usize {
+        self.remap_with(|p| p.strip_prefix(from).ok().map(|r| to.join(r)))
+    }
+
+    fn remap_with(&self, map: impl Fn(&Path) -> Option<PathBuf>) -> usize {
         let mut moved: HashMap<String, String> = HashMap::new();
         {
             let mut tracks = self.tracks.write().unwrap();
-            let old: Vec<Track> = tracks.values().filter(|t| Path::new(&t.path).starts_with(from)).cloned().collect();
-            for mut t in old {
-                let Ok(rel) = Path::new(&t.path).strip_prefix(from).map(Path::to_path_buf) else { continue };
-                let new_path = to.join(rel).to_string_lossy().into_owned();
+            let old: Vec<(Track, PathBuf)> = tracks.values().filter_map(|t| map(Path::new(&t.path)).map(|p| (t.clone(), p))).collect();
+            for (mut t, to) in old {
+                let new_path = to.to_string_lossy().into_owned();
                 let new_id = hash(&new_path);
                 tracks.remove(&t.id);
                 moved.insert(t.id.clone(), new_id.clone());
@@ -999,7 +1011,7 @@ impl Library {
             let mut hidden = self.hidden.write().unwrap();
             let next: HashSet<String> = hidden
                 .drain()
-                .map(|p| Path::new(&p).strip_prefix(from).map(|r| to.join(r).to_string_lossy().into_owned()).unwrap_or(p))
+                .map(|p| map(Path::new(&p)).map(|n| n.to_string_lossy().into_owned()).unwrap_or(p))
                 .collect();
             *hidden = next;
             store("hidden.json", &*hidden);
@@ -1007,8 +1019,8 @@ impl Library {
         {
             let mut linked = self.linked.write().unwrap();
             for l in linked.iter_mut() {
-                if let Ok(r) = Path::new(&l.path).strip_prefix(from) {
-                    l.path = to.join(r).to_string_lossy().into_owned();
+                if let Some(n) = map(Path::new(&l.path)) {
+                    l.path = n.to_string_lossy().into_owned();
                 }
             }
             store("linked.json", &*linked);
@@ -1156,6 +1168,27 @@ mod tests {
         assert!(t.path.starts_with(&*new.to_string_lossy()));
         assert!(snap.liked.contains(&t.id));
         assert_eq!(snap.plays.get(&t.id), Some(&1));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn moving_one_song_keeps_its_likes_and_plays() {
+        let root = std::env::temp_dir().join(format!("atmo-remap1-{}-{}", std::process::id(), now()));
+        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let (from, to) = (root.join("Tracks").join("one.wav"), root.join("Albums").join("A").join("one.wav"));
+        wav(&from, 2);
+        wav(&root.join("Tracks").join("two.wav"), 2);
+        let lib = Library::load();
+        lib.scan(std::slice::from_ref(&root), &root.join("Playlists"), |_, _| {}).unwrap();
+        let id = lib.find_track(|t| Path::new(&t.path) == from).unwrap().id;
+        lib.like(&id, true);
+        std::fs::create_dir_all(to.parent().unwrap()).unwrap();
+        std::fs::rename(&from, &to).unwrap();
+        let new_id = lib.remap_file(&from, &to).unwrap();
+        let snap = lib.snapshot(&root.join("Playlists"));
+        assert_eq!(snap.tracks.len(), 2);
+        assert!(snap.liked.contains(&new_id));
+        assert!(snap.tracks.iter().any(|t| t.path.ends_with("two.wav")));
         let _ = std::fs::remove_dir_all(&root);
     }
 

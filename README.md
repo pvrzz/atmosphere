@@ -54,7 +54,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - **Search everything** with `Ctrl K`: songs, albums, artists and playlists, ranked by what you play most. Paste a link there to get it.
 - **Your folders:** the download folder plus any music folders you add. Scans are incremental, and a **live file watcher** picks up added, moved or deleted files within about a second.
 - **Songs, Albums, Artists, Liked.** The song list is virtualized, so big libraries scroll smoothly. Search and sort everywhere.
-- **Artist profiles** with popular tracks, albums, singles & EPs, and **Featured on**, which shows the release type and which song features them. Photos, bios and logos are found automatically from Deezer, Wikipedia and Wikidata (keyless, can be turned off). Not the right artist? Search online and pick, or use your own images.
+- **Artist profiles** with popular tracks, albums, singles & EPs, and **Featured on**, which shows the release type and which song features them. Photos, bios and logos are found automatically from Deezer, Wikipedia, Wikidata and TheAudioDB (keyless, can be turned off). Not the right artist? Search online and pick a photo, logo or bio, or use your own images.
 - **Edit everything:**
   - songs, several songs at once, and whole albums, including one cover for every track
   - playlists: name and cover, saved as `cover.jpg` so other players show it too
@@ -103,7 +103,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 ### Downloads
 - One bar for links and search (YouTube and SoundCloud). Paste anywhere, drag links in, or accept the "Use copied link" offer.
 - **Direct file links** ending in `.mp3`, `.wav`, `.flac`, `.mp4` and similar are checked first to make sure they're real media, then read for their actual bitrate, length, tags and cover art.
-- **Organized folders:** albums go in `Albums`, playlists in `Playlists` (where they show up as playlists) and single songs in `Tracks`.
+- **Organized folders:** albums go in `Albums`, playlists in `Playlists` (where they show up as playlists) and single songs in `Tracks`. A single song from an album you already have joins that album's folder, and when you give a song in `Tracks` an album, it moves into that album's folder along with its lyrics and video. Plays and likes come along too.
 - **Clean titles:** YouTube's "(Official Music Video)" and similar tags are removed, and "Artist - Title" uploads get the real artist. When you save only the sound of a music video, Atmosphere prefers the artist's official audio upload.
 - **Release detection:** Album, EP, Single, LP, Compilation, Mixtape, Playlist, Profile and Channel. This drives track numbering, album tags and folder names.
 - **Save as** describes outcomes:
@@ -120,6 +120,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - Extras: chapters, subtitles, SponsorBlock, a speed limit, a proxy, and sign-in for your own private uploads, either from your browser or from a `cookies.txt` file. **Check** confirms it works and explains what to do if it doesn't. For example, Chromium browsers lock their sign-in while they're open.
 
 ### Connections
+- **Discord:** show what you're listening to, with the cover, artist and a progress bar. Choose whether your status names Atmosphere, the artist or the song, and whether it stays while paused. You can also use your own Discord app, so your status shows its name: **Save the images** puts the art Discord needs in a folder you choose, with the setup steps.
 - An optional **local API** lets other apps on your computer, like stream overlays, status tools or your own scripts, see what's playing, browse your library, control playback and send links to Get.
 - It's off until you turn it on, listens on `127.0.0.1` only, and needs a token that's shown once and stored only as a fingerprint.
 - You choose what apps may do, and browser pages are refused. See the [API guide](docs/api.md).
@@ -224,7 +225,8 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/backup.rs` | Backup and restore of settings, stats and liked songs |
 | `src/api.rs` | The opt-in local API for other apps ([guide](docs/api.md)) |
 | `src/updates.rs` | Signed in-app updates from GitHub Releases ([releasing](docs/releasing.md)) |
-| `src/artistinfo.rs` | Artist photos, bios and logos from Deezer, Wikipedia and Wikidata |
+| `src/artistinfo.rs` | Artist photos, bios and logos from Deezer, Wikipedia, Wikidata and TheAudioDB |
+| `src/discord.rs` | Discord Rich Presence over Discord's local connection, and its art assets |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
 | `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |

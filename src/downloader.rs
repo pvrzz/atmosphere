@@ -733,8 +733,17 @@ pub fn target_dir(settings: &Settings, req: &JobRequest) -> PathBuf {
             if settings.playlists_dir.trim().is_empty() { base.join("Playlists") } else { lists }.join(sanitize(name))
         }
         (None, Some(name)) => base.join(sanitize(name)),
-        _ => base.join("Tracks"),
+        _ => {
+            let album = req.meta.album.trim();
+            let existing = (settings.collection_folders && !album.is_empty()).then(|| existing_dir(&base.join("Albums"), &sanitize(album))).flatten();
+            existing.unwrap_or_else(|| base.join("Tracks"))
+        }
     }
+}
+
+pub fn existing_dir(parent: &Path, name: &str) -> Option<PathBuf> {
+    let want = name.to_lowercase();
+    std::fs::read_dir(parent).ok()?.flatten().find(|e| e.path().is_dir() && e.file_name().to_string_lossy().to_lowercase() == want).map(|e| e.path())
 }
 
 fn file_stem(settings: &Settings, req: &JobRequest) -> String {
@@ -877,6 +886,18 @@ mod tests {
         assert_eq!(target_dir(&settings, &req(Some("track"), None)), PathBuf::from("M").join("Tracks"));
         let flat = Settings { collection_folders: false, ..settings.clone() };
         assert_eq!(target_dir(&flat, &req(Some("album"), Some("Luxury"))), PathBuf::from("M").join("Tracks"));
+    }
+
+    #[test]
+    fn single_songs_join_an_album_folder_that_already_exists() {
+        let base = std::env::temp_dir().join(format!("atmo-single-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("Albums").join("Luxury")).unwrap();
+        let settings = Settings { output_dir: base.to_string_lossy().into_owned(), collection_folders: true, ..Default::default() };
+        let req = |album: &str| JobRequest { entry: entry(None, false, vec![]), meta: TagFields { album: album.into(), ..Default::default() }, folder: None, trim: None, playlist: None, kind: Some("track".into()) };
+        assert_eq!(target_dir(&settings, &req("luxury")), base.join("Albums").join("Luxury"));
+        assert_eq!(target_dir(&settings, &req("Something Else")), base.join("Tracks"));
+        assert_eq!(target_dir(&settings, &req("")), base.join("Tracks"));
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

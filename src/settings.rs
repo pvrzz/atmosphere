@@ -65,6 +65,11 @@ pub struct Settings {
     pub api_enabled: bool,
     pub check_updates: bool,
     pub artist_info: bool,
+    pub discord_enabled: bool,
+    pub discord_client_id: String,
+    pub discord_cover: bool,
+    pub discord_paused: bool,
+    pub discord_status: String,
     pub api_port: u16,
     pub api_read: bool,
     pub api_control: bool,
@@ -114,6 +119,11 @@ impl Default for Settings {
             api_enabled: false,
             check_updates: true,
             artist_info: true,
+            discord_enabled: false,
+            discord_client_id: String::new(),
+            discord_cover: true,
+            discord_paused: true,
+            discord_status: "app".into(),
             api_port: 47823,
             api_read: true,
             api_control: true,
@@ -161,6 +171,11 @@ pub struct SettingsPatch {
     pub api_enabled: Option<bool>,
     pub check_updates: Option<bool>,
     pub artist_info: Option<bool>,
+    pub discord_enabled: Option<bool>,
+    pub discord_client_id: Option<String>,
+    pub discord_cover: Option<bool>,
+    pub discord_paused: Option<bool>,
+    pub discord_status: Option<String>,
     pub api_port: Option<u16>,
     pub api_read: Option<bool>,
     pub api_control: Option<bool>,
@@ -214,6 +229,13 @@ impl Settings {
         }
         set!(save_as, embed_metadata, collection_folders, number_tracks, skip_downloaded, sponsorblock, embed_subtitles, embed_chapters, watch_clipboard);
         set!(api_enabled, api_read, api_control, api_links, check_updates, artist_info, video_keep_audio, prefer_official_audio);
+        set!(discord_enabled, discord_cover, discord_paused);
+        if let Some(v) = p.discord_client_id.map(|v| v.trim().to_string()).filter(|v| v.is_empty() || (v.len() >= 15 && v.len() <= 25 && v.bytes().all(|b| b.is_ascii_digit()))) {
+            self.discord_client_id = v;
+        }
+        if let Some(v) = p.discord_status.filter(|v| matches!(v.as_str(), "app" | "artist" | "song")) {
+            self.discord_status = v;
+        }
         if let Some(p) = p.api_port.filter(|p| *p >= 1024) {
             self.api_port = p;
         }

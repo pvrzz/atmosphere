@@ -5,6 +5,7 @@ mod api;
 mod artistinfo;
 mod backup;
 mod direct;
+mod discord;
 mod downloader;
 mod engine;
 mod history;
@@ -110,6 +111,10 @@ fn save_settings(app: AppHandle, state: State<'_, AppState>, patch: SettingsPatc
     if (after.api_enabled, after.api_port) != (before.api_enabled, before.api_port) {
         api::apply(&app);
     }
+    let opts = discord::Options::from(&after);
+    if opts != discord::Options::from(&before) {
+        app.state::<discord::DiscordHub>().configure(opts);
+    }
     Ok(view(after))
 }
 
@@ -123,6 +128,30 @@ fn api_new_token(app: AppHandle, hub: State<'_, api::ApiHub>) -> CmdResult<Strin
     let token = hub.new_token().map_err(err)?;
     api::apply(&app);
     Ok(token)
+}
+
+#[tauri::command]
+fn discord_status(hub: State<'_, discord::DiscordHub>) -> discord::Status {
+    hub.status()
+}
+
+#[tauri::command]
+fn discord_now(hub: State<'_, discord::DiscordHub>, now: Option<discord::NowPlaying>) {
+    hub.now_playing(now);
+}
+
+#[tauri::command]
+async fn discord_save_assets(app: AppHandle) -> CmdResult<Option<String>> {
+    let start = dirs::desktop_dir().or_else(dirs::download_dir).unwrap_or_default();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().set_directory(start).set_title("Choose where to save the Discord images").blocking_pick_folder()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(dir) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
+    let dir = dir.join("Atmosphere for Discord");
+    discord::write_assets(&dir).map_err(err)?;
+    Ok(Some(dir.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -470,6 +499,7 @@ fn main() {
             let dl = Arc::new(Downloader::new(app.handle().clone(), settings.clone(), history.clone(), library.clone(), http.clone()));
             app.manage(AppState { settings: settings.clone(), http: http.clone(), prober: Arc::new(Prober::default()), dl, history, library, startup_cleanup: Mutex::new(Some(cleaned)), pending_open: Mutex::new(libcmd::audio_args(std::env::args().skip(1))) });
             app.manage(api::ApiHub::load());
+            app.manage(discord::DiscordHub::start(app.handle().clone(), http.clone(), discord::Options::from(&settings.lock().unwrap())));
             api::apply(app.handle());
             libcmd::spawn_scan(app.handle().clone());
             libcmd::start_linked_monitor(app.handle().clone());
@@ -484,6 +514,9 @@ fn main() {
             api_status,
             api_new_token,
             api_publish,
+            discord_status,
+            discord_now,
+            discord_save_assets,
             frame_color,
             backup_save,
             backup_pick,

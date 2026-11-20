@@ -1,4 +1,4 @@
-// atmosphere · artistinfo.rs · Finds artist photos, bios and logos from keyless public sources: Deezer, Wikipedia and Wikidata
+// atmosphere · artistinfo.rs · Finds artist photos, bios and logos from keyless public sources: Deezer, Wikipedia, Wikidata and TheAudioDB
 use anyhow::Result;
 use base64::Engine as _;
 use regex::Regex;
@@ -7,6 +7,7 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 const MAX_IMAGE: usize = 8 * 1024 * 1024;
+const AUDIODB: &str = "https://www.theaudiodb.com/api/v1/json/123";
 
 #[derive(Default)]
 pub struct Found {
@@ -34,7 +35,7 @@ fn title_matches(key: &str, name: &str) -> bool {
     norm(base) == norm(name)
 }
 
-async fn get_json(http: &reqwest::Client, url: &str) -> Option<Value> {
+pub(crate) async fn get_json(http: &reqwest::Client, url: &str) -> Option<Value> {
     let r = http.get(url).timeout(Duration::from_secs(15)).send().await.ok()?;
     if !r.status().is_success() {
         return None;
@@ -51,7 +52,7 @@ async fn get_bytes(http: &reqwest::Client, url: &str) -> Option<Vec<u8>> {
     (b.len() <= MAX_IMAGE && !b.is_empty()).then(|| b.to_vec())
 }
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }
 
@@ -103,6 +104,39 @@ async fn wikidata_file(http: &reqwest::Client, qid: &str, prop: &str) -> Option<
     get_bytes(http, &format!("https://commons.wikimedia.org/wiki/Special:FilePath/{}?width=800", path_enc(file))).await
 }
 
+struct AudioDb {
+    id: String,
+    logo: Option<String>,
+    thumb: Option<String>,
+    bio: Option<String>,
+}
+
+fn audiodb_entry(a: &Value) -> Option<AudioDb> {
+    let url = |k: &str| a[k].as_str().filter(|u| u.starts_with("https://")).map(String::from);
+    Some(AudioDb { id: a["idArtist"].as_str()?.to_string(), logo: url("strArtistLogo"), thumb: url("strArtistThumb"), bio: a["strBiographyEN"].as_str().map(str::trim).filter(|b| b.len() >= 40).map(String::from) })
+}
+
+async fn audiodb_search(http: &reqwest::Client, query: &str) -> Vec<Value> {
+    get_json(http, &format!("{AUDIODB}/search.php?s={}", enc(query))).await.and_then(|v| v["artists"].as_array().cloned()).unwrap_or_default()
+}
+
+async fn audiodb(http: &reqwest::Client, name: &str) -> Option<AudioDb> {
+    let want = norm(name);
+    audiodb_search(http, name).await.iter().find(|a| a["strArtist"].as_str().is_some_and(|n| norm(n) == want)).and_then(audiodb_entry)
+}
+
+pub fn audiodb_page(id: &str) -> String {
+    format!("https://www.theaudiodb.com/artist/{id}")
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogoChoice {
+    pub name: String,
+    pub thumb: String,
+    pub full: String,
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PhotoChoice {
@@ -121,7 +155,7 @@ pub struct PageChoice {
     pub music: bool,
 }
 
-pub async fn choices(http: &reqwest::Client, query: &str) -> (Vec<PhotoChoice>, Vec<PageChoice>) {
+pub async fn choices(http: &reqwest::Client, query: &str) -> (Vec<PhotoChoice>, Vec<PageChoice>, Vec<LogoChoice>) {
     let q = enc(query);
     let photos = async {
         let Some(v) = get_json(http, &format!("https://api.deezer.com/search/artist?q={q}&limit=12")).await else { return Vec::new() };
@@ -151,23 +185,49 @@ pub async fn choices(http: &reqwest::Client, query: &str) -> (Vec<PhotoChoice>, 
             })
             .unwrap_or_default()
     };
-    let (mut photos, pages) = tokio::join!(photos, pages);
-    let thumbs = futures_util::future::join_all(photos.iter().map(|p| get_bytes(http, &p.thumb))).await;
+    let logos = async {
+        audiodb_search(http, query)
+            .await
+            .iter()
+            .filter_map(|a| {
+                let full = a["strArtistLogo"].as_str().filter(|u| allowed_logo(u))?.to_string();
+                Some(LogoChoice { name: a["strArtist"].as_str()?.to_string(), thumb: format!("{full}/preview"), full })
+            })
+            .take(8)
+            .collect::<Vec<_>>()
+    };
+    let (mut photos, pages, mut logos) = tokio::join!(photos, pages, logos);
+    let b64 = |b: Vec<u8>, mime: &str| format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(b));
+    let (thumbs, logo_thumbs) = tokio::join!(
+        futures_util::future::join_all(photos.iter().map(|p| get_bytes(http, &p.thumb))),
+        futures_util::future::join_all(logos.iter().map(|l| async { match get_bytes(http, &l.thumb).await { Some(b) => Some(b), None => get_bytes(http, &l.full).await } }))
+    );
     for (p, bytes) in photos.iter_mut().zip(thumbs) {
-        p.thumb = bytes.map(|b| format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(b))).unwrap_or_default();
+        p.thumb = bytes.map(|b| b64(b, "image/jpeg")).unwrap_or_default();
+    }
+    for (l, bytes) in logos.iter_mut().zip(logo_thumbs) {
+        l.thumb = bytes.map(|b| b64(b, "image/png")).unwrap_or_default();
     }
     photos.retain(|p| !p.thumb.is_empty());
-    (photos, pages)
+    logos.retain(|l| !l.thumb.is_empty());
+    (photos, pages, logos)
+}
+
+pub fn allowed_logo(url: &str) -> bool {
+    url::Url::parse(url).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some_and(|h| h == "theaudiodb.com" || h.ends_with(".theaudiodb.com")))
 }
 
 pub fn allowed_photo(url: &str) -> bool {
     url::Url::parse(url).is_ok_and(|u| u.scheme() == "https" && u.host_str().is_some_and(|h| h.ends_with(".dzcdn.net")))
 }
 
-pub async fn chosen(http: &reqwest::Client, photo: Option<&str>, page: Option<&str>) -> Found {
+pub async fn chosen(http: &reqwest::Client, photo: Option<&str>, page: Option<&str>, logo: Option<&str>) -> Found {
     let mut found = Found::default();
     if let Some(url) = photo.filter(|u| allowed_photo(u)) {
         found.photo = get_bytes(http, url).await;
+    }
+    if let Some(url) = logo.filter(|u| allowed_logo(u)) {
+        found.logo = get_bytes(http, url).await;
     }
     if let Some(key) = page.filter(|k| !k.is_empty() && k.len() < 300 && !k.contains('/')) {
         if let Some(s) = get_json(http, &format!("https://en.wikipedia.org/api/rest_v1/page/summary/{}", path_enc(key))).await {
@@ -175,7 +235,9 @@ pub async fn chosen(http: &reqwest::Client, photo: Option<&str>, page: Option<&s
                 found.bio = s["extract"].as_str().map(|t| t.trim().to_string());
                 found.bio_source = s["content_urls"]["desktop"]["page"].as_str().map(String::from);
                 if let Some(q) = s["wikibase_item"].as_str() {
-                    found.logo = wikidata_file(http, q, "P154").await;
+                    if logo.is_none() {
+                        found.logo = wikidata_file(http, q, "P154").await;
+                    }
                     if found.photo.is_none() && photo.is_none() {
                         found.photo = wikidata_file(http, q, "P18").await;
                     }
@@ -202,20 +264,45 @@ pub async fn find(http: &reqwest::Client, name: &str, want_photo: bool, want_bio
             None
         }
     };
-    let (photo, wiki) = tokio::join!(photo, wiki);
+    let adb = async {
+        if want_logo || want_photo || want_bio {
+            audiodb(http, name).await
+        } else {
+            None
+        }
+    };
+    let (photo, wiki, adb) = tokio::join!(photo, wiki, adb);
     found.photo = photo;
+    if let Some(a) = &adb {
+        if want_logo {
+            if let Some(u) = a.logo.as_deref() {
+                found.logo = get_bytes(http, u).await;
+            }
+        }
+    }
     if let Some((bio, url, qid)) = wiki {
         if want_bio {
             found.bio = Some(bio);
             found.bio_source = Some(url);
         }
         if let Some(q) = qid {
-            if want_logo {
+            if want_logo && found.logo.is_none() {
                 found.logo = wikidata_file(http, &q, "P154").await;
             }
             if want_photo && found.photo.is_none() {
                 found.photo = wikidata_file(http, &q, "P18").await;
             }
+        }
+    }
+    if let Some(a) = adb {
+        if want_photo && found.photo.is_none() {
+            if let Some(u) = a.thumb.as_deref() {
+                found.photo = get_bytes(http, u).await;
+            }
+        }
+        if want_bio && found.bio.is_none() {
+            found.bio = a.bio;
+            found.bio_source = Some(audiodb_page(&a.id));
         }
     }
     Ok(found)
@@ -241,6 +328,13 @@ mod tests {
         assert!(!allowed_photo("http://cdn-images.dzcdn.net/x.jpg"));
         assert!(!allowed_photo("https://evil.example/dzcdn.net.jpg"));
         assert!(!allowed_photo("file:///C:/Windows/win.ini"));
+        assert!(allowed_logo("https://r2.TheAudioDB.com/images/media/artist/logo/x.png"));
+        assert!(allowed_logo("https://www.theaudiodb.com/images/media/artist/logo/x.png"));
+        assert!(!allowed_logo("https://theaudiodb.com.evil.example/x.png"));
+        assert!(!allowed_logo("http://www.theaudiodb.com/x.png"));
+        let a = audiodb_entry(&serde_json::json!({ "idArtist": "111", "strArtistLogo": "https://r2.theaudiodb.com/l.png", "strArtistThumb": null, "strBiographyEN": "short" })).unwrap();
+        assert_eq!(a.logo.as_deref(), Some("https://r2.theaudiodb.com/l.png"));
+        assert!(a.thumb.is_none() && a.bio.is_none());
     }
 
     #[tokio::test]
@@ -248,8 +342,12 @@ mod tests {
     async fn live_choices_include_photos() {
         let http = reqwest::Client::builder().user_agent(concat!("atmosphere/", env!("CARGO_PKG_VERSION"))).build().unwrap();
         for q in ["Daft Punk", "Drake", "Taylor Swift", "Westwood"] {
-            let (photos, pages) = choices(&http, q).await;
-            eprintln!("{q}: {} photos, {} pages", photos.len(), pages.len());
+            let (photos, pages, logos) = choices(&http, q).await;
+            eprintln!("{q}: {} photos, {} pages, {} logos", photos.len(), pages.len(), logos.len());
+            assert!(logos.iter().all(|l| l.thumb.starts_with("data:image/png;base64,") && allowed_logo(&l.full)));
+            if q != "Westwood" {
+                assert!(!logos.is_empty(), "no logos for {q}");
+            }
             assert!(!photos.is_empty(), "no photos for {q}");
             assert!(photos.iter().all(|p| p.thumb.starts_with("data:image/jpeg;base64,") && p.full.starts_with("https://")));
         }

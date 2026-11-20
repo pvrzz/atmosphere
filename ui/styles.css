@@ -1191,3 +1191,16 @@ body.mini-mode > *:not(#mini):not(.toasts):not(.modal-wrap):not(script) { displa
 .mini .mini-info, .mini .mini-ctl, .mini .mini-top { flex-shrink: 0; }
 .mini.has-panel .mini-panel { min-height: 96px; }
 .mini.tiny.has-panel .mini-panel { display: none; }
+
+/* discord */
+.discord-opt.dim { opacity: 0.55; }
+.discord-steps { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--text-2); font-size: 12.5px; line-height: 1.45; }
+.discord-steps strong { color: var(--text); font-weight: 600; }
+.discord-assets { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.discord-assets .muted { font-size: 12px; }
+
+/* artist logo picker */
+.pick-logos { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s2); }
+.pick-logo { display: grid; gap: 6px; padding: var(--s3); border-radius: var(--r-ctl); border: 1px solid var(--border); background: repeating-conic-gradient(rgba(127, 127, 127, 0.14) 0 25%, transparent 0 50%) 0 0 / 14px 14px; color: var(--text-2); font-size: 12px; text-align: center; cursor: pointer; }
+.pick-logo img { width: 100%; height: 56px; object-fit: contain; }
+.pick-logo.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }

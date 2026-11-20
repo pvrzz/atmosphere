@@ -361,9 +361,125 @@ pub async fn track_edit(app: AppHandle, state: State<'_, AppState>, id: String, 
     let ffmpeg = crate::engine::locate(&s.ytdlp_path, &s.ffmpeg_path).ok().and_then(|t| t.ffmpeg);
     tagging::apply(Path::new(&t.path), &meta, "", ffmpeg.as_deref()).await.map_err(err)?;
     let (_, pl) = dirs(&state);
-    let updated = state.library.refresh(&id, &pl).map_err(err)?;
+    let mut updated = state.library.refresh(&id, &pl).map_err(err)?;
+    if let Some(moved) = file_by_album(&state, &[(t, updated.clone())]).into_iter().next() {
+        updated = moved;
+    }
     changed(&app);
     Ok(updated)
+}
+
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let n = |p: &Path| p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_lowercase();
+    n(a) == n(b)
+}
+
+pub fn album_home(base: &Path, file: &Path, album: &str, known: Option<PathBuf>) -> Option<PathBuf> {
+    let (tracks, albums) = (base.join("Tracks"), base.join("Albums"));
+    let parent = file.parent()?;
+    let in_tracks = same_dir(parent, &tracks);
+    let in_album = parent.parent().is_some_and(|p| same_dir(p, &albums));
+    let album = album.trim();
+    if !(in_tracks || in_album) || album.is_empty() {
+        return None;
+    }
+    let name = crate::downloader::sanitize(album);
+    let target = known.or_else(|| crate::downloader::existing_dir(&albums, &name)).unwrap_or_else(|| albums.join(&name));
+    (!same_dir(&target, parent)).then_some(target)
+}
+
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    std::fs::remove_file(from)
+}
+
+pub fn move_with_sidecars(file: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let parent = file.parent().ok_or_else(|| std::io::Error::other("no folder"))?.to_path_buf();
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = file.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    let mut dest = dir.join(format!("{stem}{ext}"));
+    let mut n = 2;
+    while dest.exists() {
+        dest = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    move_file(file, &dest)?;
+    let new_stem = dest.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    for e in std::fs::read_dir(&parent)?.flatten() {
+        let p = e.path();
+        if !p.is_file() || p.file_stem().map(|s| s.to_string_lossy().into_owned()).as_deref() != Some(stem.as_str()) {
+            continue;
+        }
+        let ext = p.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+        let to = dir.join(format!("{new_stem}{ext}"));
+        if !to.exists() {
+            let _ = move_file(&p, &to);
+        }
+    }
+    Ok(dest)
+}
+
+fn tidy_album_dir(dir: &Path, albums: &Path, went_to: &HashSet<PathBuf>) {
+    if !dir.parent().is_some_and(|p| same_dir(p, albums)) {
+        return;
+    }
+    let Ok(rest) = std::fs::read_dir(dir) else { return };
+    let rest: Vec<PathBuf> = rest.flatten().map(|e| e.path()).collect();
+    if rest.iter().any(|p| p.is_dir() || crate::library::is_playable(p)) {
+        return;
+    }
+    if let (1, Some(target)) = (went_to.len(), went_to.iter().next()) {
+        for p in &rest {
+            if let Some(name) = p.file_name() {
+                if !target.join(name).exists() {
+                    let _ = move_file(p, &target.join(name));
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(dir);
+}
+
+fn file_by_album(state: &AppState, edits: &[(Track, Track)]) -> Vec<Track> {
+    let s = state.snapshot();
+    if !s.collection_folders {
+        return Vec::new();
+    }
+    let base = PathBuf::from(&s.output_dir);
+    let albums = base.join("Albums");
+    let editing: HashSet<&str> = edits.iter().map(|(_, a)| a.path.as_str()).collect();
+    let norm = crate::artistinfo::norm;
+    let mut out = Vec::new();
+    let mut left: std::collections::HashMap<PathBuf, HashSet<PathBuf>> = std::collections::HashMap::new();
+    for (before, after) in edits {
+        if norm(&before.album) == norm(&after.album) || after.album.trim().is_empty() {
+            continue;
+        }
+        let file = PathBuf::from(&after.path);
+        let (want, by) = (norm(&after.album), norm(&after.album_artist));
+        let in_albums = |t: &Track| Path::new(&t.path).parent().and_then(Path::parent).is_some_and(|p| same_dir(p, &albums));
+        let same_artist = |t: &Track| by.is_empty() || norm(&t.album_artist).is_empty() || norm(&t.album_artist) == by;
+        let known = state
+            .library
+            .find_track(|t| !editing.contains(t.path.as_str()) && norm(&t.album) == want && same_artist(t) && in_albums(t))
+            .and_then(|t| Path::new(&t.path).parent().map(Path::to_path_buf));
+        let Some(dir) = album_home(&base, &file, &after.album, known) else { continue };
+        let Ok(dest) = move_with_sidecars(&file, &dir) else { continue };
+        if let Some(old_dir) = file.parent() {
+            left.entry(old_dir.to_path_buf()).or_default().insert(dir.clone());
+        }
+        if let Some(t) = state.library.remap_file(&file, &dest).and_then(|id| state.library.track(&id)) {
+            out.push(t);
+        }
+    }
+    for (dir, went_to) in &left {
+        tidy_album_dir(dir, &albums, went_to);
+    }
+    out
 }
 
 #[tauri::command]
@@ -600,17 +716,21 @@ pub async fn tracks_edit(app: AppHandle, state: State<'_, AppState>, ids: Vec<St
     let (_, pl) = dirs(&state);
     let mut done = 0;
     let mut failed = Vec::new();
+    let mut edits = Vec::new();
     for (i, id) in ids.iter().enumerate() {
         let Some(t) = state.library.track(id) else { continue };
         match tagging::apply(Path::new(&t.path), &meta, "", ffmpeg.as_deref()).await {
             Ok(()) => {
-                let _ = state.library.refresh(id, &pl);
+                if let Ok(after) = state.library.refresh(id, &pl) {
+                    edits.push((t, after));
+                }
                 done += 1;
             }
             Err(e) => failed.push(format!("{} ({e})", t.title)),
         }
         let _ = app.emit(LIBRARY_EVENT, serde_json::json!({ "type": "editing", "done": i + 1, "total": ids.len() }));
     }
+    file_by_album(&state, &edits);
     changed(&app);
     if done == 0 && !failed.is_empty() {
         return Err(format!("Couldn't update {}", failed.join(", ")));
@@ -720,18 +840,18 @@ pub async fn import_file(app: AppHandle, state: State<'_, AppState>, request: ta
 pub async fn artist_choices(state: State<'_, AppState>, query: String) -> CmdResult<serde_json::Value> {
     let q = query.trim();
     if q.is_empty() {
-        return Ok(serde_json::json!({ "photos": [], "pages": [] }));
+        return Ok(serde_json::json!({ "photos": [], "pages": [], "logos": [] }));
     }
-    let (photos, pages) = crate::artistinfo::choices(&state.http, q).await;
-    Ok(serde_json::json!({ "photos": photos, "pages": pages }))
+    let (photos, pages, logos) = crate::artistinfo::choices(&state.http, q).await;
+    Ok(serde_json::json!({ "photos": photos, "pages": pages, "logos": logos }))
 }
 
 #[tauri::command]
-pub async fn artist_apply(state: State<'_, AppState>, name: String, photo: Option<String>, page: Option<String>) -> CmdResult<crate::library::ArtistMeta> {
-    if photo.as_deref().is_some_and(|u| !crate::artistinfo::allowed_photo(u)) {
-        return Err("That photo isn't from a source Atmosphere trusts.".into());
+pub async fn artist_apply(state: State<'_, AppState>, name: String, photo: Option<String>, page: Option<String>, logo: Option<String>) -> CmdResult<crate::library::ArtistMeta> {
+    if photo.as_deref().is_some_and(|u| !crate::artistinfo::allowed_photo(u)) || logo.as_deref().is_some_and(|u| !crate::artistinfo::allowed_logo(u)) {
+        return Err("That image isn't from a source Atmosphere trusts.".into());
     }
-    let found = crate::artistinfo::chosen(&state.http, photo.as_deref(), page.as_deref()).await;
+    let found = crate::artistinfo::chosen(&state.http, photo.as_deref(), page.as_deref(), logo.as_deref()).await;
     if found.photo.is_none() && found.bio.is_none() && found.logo.is_none() {
         return Err("Couldn't get anything from that choice. Try another one.".into());
     }
@@ -850,6 +970,41 @@ pub async fn move_music(app: AppHandle, state: State<'_, AppState>, to: String) 
 #[cfg(test)]
 mod move_tests {
     use super::*;
+
+    #[test]
+    fn songs_given_an_album_move_into_its_folder_with_their_lyrics() {
+        let base = std::env::temp_dir().join(format!("atmo-album-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (tracks, albums) = (base.join("Tracks"), base.join("Albums"));
+        std::fs::create_dir_all(albums.join("Random Access Memories")).unwrap();
+        std::fs::create_dir_all(&tracks).unwrap();
+        let song = tracks.join("Daft Punk - Get Lucky.m4a");
+        std::fs::write(&song, b"a").unwrap();
+        std::fs::write(tracks.join("Daft Punk - Get Lucky.lrc"), b"l").unwrap();
+        std::fs::write(tracks.join("Daft Punk - Get Lucky.mp4"), b"v").unwrap();
+
+        assert_eq!(album_home(&base, &song, "random access memories", None), Some(albums.join("Random Access Memories")));
+        assert_eq!(album_home(&base, &song, "Brand New", None), Some(albums.join("Brand New")));
+        assert_eq!(album_home(&base, &song, "", None), None);
+        assert_eq!(album_home(&base, &base.join("Mine").join("x.mp3"), "Brand New", None), None);
+        assert_eq!(album_home(&base, &albums.join("Random Access Memories").join("x.mp3"), "Random Access Memories", None), None);
+        assert_eq!(album_home(&base, &song, "RAM", Some(albums.join("Random Access Memories"))), Some(albums.join("Random Access Memories")));
+
+        let dest = move_with_sidecars(&song, &albums.join("Random Access Memories")).unwrap();
+        assert_eq!(dest, albums.join("Random Access Memories").join("Daft Punk - Get Lucky.m4a"));
+        for ext in ["m4a", "lrc", "mp4"] {
+            assert!(albums.join("Random Access Memories").join(format!("Daft Punk - Get Lucky.{ext}")).is_file());
+            assert!(!tracks.join(format!("Daft Punk - Get Lucky.{ext}")).exists());
+        }
+
+        let old = albums.join("Old Name");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("cover.jpg"), b"c").unwrap();
+        tidy_album_dir(&old, &albums, &HashSet::from([albums.join("Random Access Memories")]));
+        assert!(!old.exists());
+        assert!(albums.join("Random Access Memories").join("cover.jpg").is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn moves_a_tree_and_keeps_both_on_name_clashes() {

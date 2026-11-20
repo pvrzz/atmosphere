@@ -204,7 +204,7 @@
             <div class="group" id="libFolders"></div>
             <div class="group gap-top">
               <div class="setting"><div><strong>Playlist folders live in</strong><span id="playlistsDir"></span></div></div>
-              <label class="setting"><div><strong>Find artist photos, bios and logos</strong><span>Looks up artist names on Deezer, Wikipedia and Wikidata, which need no account or key. Nothing else is sent, and you can change or remove anything on an artist's page.</span></div><input type="checkbox" class="switch" data-key="artistInfo" /></label>
+              <label class="setting"><div><strong>Find artist photos, bios and logos</strong><span>Looks up artist names on Deezer, Wikipedia, Wikidata and TheAudioDB, which need no account or key. Nothing else is sent, and you can change or remove anything on an artist's page.</span></div><input type="checkbox" class="switch" data-key="artistInfo" /></label>
               <div class="setting" id="hiddenSongs"></div>
               <label class="setting"><div><strong>Copy songs into playlists</strong><span>Off: songs are hard-linked, so they appear in the folder without using extra space (same drive only). On: real copies, which are best for syncing to phones and USB drives.</span></div><input type="checkbox" class="switch" data-key="playlistCopy" /></label>
             </div>
@@ -283,6 +283,29 @@
                 <div class="seg" data-seg="theme"><button type="button" data-value="system">System</button><button type="button" data-value="light">Light</button><button type="button" data-value="dark">Dark</button></div>
               </div>
               <label class="setting"><div><strong>Offer copied links</strong><span>When you switch to Atmosphere with a link copied, offer to fetch it.</span></div><input type="checkbox" class="switch" data-key="watchClipboard" /></label>
+            </div>
+
+            <h2 id="set-discord">Discord</h2>
+            <div class="group">
+              <label class="setting"><div><strong>Show what you're listening to</strong><span class="api-status" id="discordStatus" role="status">Off. Nothing is shared with Discord.</span></div><input type="checkbox" class="switch" data-key="discordEnabled" id="discordToggle" /></label>
+              <div class="setting discord-opt">
+                <div><strong>Your status says</strong><span>What people see under your name, like "Listening to Atmosphere". The song, artist and progress always show on your profile.</span></div>
+                <div class="seg" data-seg="discordStatus"><button type="button" data-value="app">Atmosphere</button><button type="button" data-value="artist">Artist</button><button type="button" data-value="song">Song</button></div>
+              </div>
+              <label class="setting discord-opt"><div><strong>Show cover art</strong><span>Discord can only show pictures from the web, so Atmosphere looks the song up on Deezer (only the artist and title are sent). Off: the Atmosphere logo is shown.</span></div><input type="checkbox" class="switch" data-key="discordCover" /></label>
+              <label class="setting discord-opt"><div><strong>Keep showing while paused</strong><span>Off: your status clears when you pause and comes back when you press play.</span></div><input type="checkbox" class="switch" data-key="discordPaused" /></label>
+              <details class="setting advanced discord-opt">
+                <summary><strong>Your own Discord app</strong><span>Shows your app's name and art instead, like "Listening to My Music". Leave the ID blank to use Atmosphere's.</span></summary>
+                <div class="adv-fields">
+                  <ol class="discord-steps">
+                    <li>Create an application in the <button class="link" id="discordPortal" type="button">Discord Developer Portal</button>. Its name is what your status shows.</li>
+                    <li>Save the images, then upload both under <strong>Rich Presence › Art Assets</strong> without renaming them.</li>
+                    <li>Paste the <strong>Application ID</strong> from <strong>General Information</strong> here.</li>
+                  </ol>
+                  <div class="discord-assets"><button class="btn" id="discordAssets" type="button"><span class="label">Save the images…</span><span class="spin" aria-hidden="true"></span></button><span class="muted small">You choose the folder. Includes the logo, the paused badge and these steps.</span></div>
+                  <label><span>Application ID</span><input class="text" id="discordClientId" placeholder="Atmosphere's own" inputmode="numeric" spellcheck="false" autocomplete="off" /></label>
+                </div>
+              </details>
             </div>
 
             <h2 id="set-api">Connections</h2>
@@ -400,5 +423,6 @@
   <script src="updates.js"></script>
   <script src="search.js"></script>
   <script src="tools.js"></script>
+  <script src="discord.js"></script>
 </body>
 </html>
