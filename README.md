@@ -8,7 +8,7 @@
 
 <p align="center">
   <b>Your music, beautifully kept.</b><br>
-  A fast, native music library, player and downloader for Windows, macOS and Linux.
+  A fast, native music library, player and downloader for Windows, macOS and Linux. 
 </p>
 
 <p align="center">
