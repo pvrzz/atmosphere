@@ -76,7 +76,7 @@ function lyricsBody(big) {
   const l = Lyr.data;
   if (!l) return h("div", { class: "lyr-state" }, h("p", {}, "No lyrics found for this song."),
     Lyr.cachedMiss ? h("p", { class: "muted small" }, "Searched recently with no match. Search again to retry every source.") : Lyr.tried.length ? h("ul", { class: "tried" }, ...Lyr.tried.map((a) => h("li", {}, h("strong", {}, a.provider), ` ${a.outcome}`))) : null,
-    h("div", { class: "row" }, h("button", { class: "btn small", onclick: () => loadLyrics(true) }, icon("refresh"), "Search again"), h("button", { class: "btn small ghost", onclick: () => { closeTv(); go("settings"); $("#set-lyrics")?.scrollIntoView(); } }, "Lyrics sources")));
+    h("div", { class: "row" }, h("button", { class: "btn small", onclick: () => loadLyrics(true) }, icon("refresh"), "Search again"), h("button", { class: "btn small ghost", onclick: () => { closeTv(); openSettings("lyrics"); } }, "Lyrics sources")));
   if (l.instrumental) return h("div", { class: "lyr-state" }, icon("music"), h("p", {}, "Instrumental"));
   return lyricLines(l, big);
 }

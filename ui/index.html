@@ -1,5 +1,5 @@
 <!doctype html>
-<!-- atmosphere · index.html · Window markup: onboarding, sidebar, Get / Downloads / Settings views and the save-as menu. -->
+<!-- atmosphere · index.html · Window markup: onboarding, sidebar, Get / Downloads views, the settings modal and the save-as menu. -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
@@ -57,9 +57,9 @@
       </div>
 
       <div class="sidebar-foot">
-        <button class="nav-item" data-nav="settings"><span class="i" data-icon="settings"></span><span>Settings</span></button>
+        <button class="nav-item" id="settingsBtn" data-settings="" aria-haspopup="dialog"><span class="i" data-icon="settings"></span><span>Settings</span><kbd>Ctrl ,</kbd></button>
         <button class="update-chip" id="updateChip" hidden></button>
-        <button class="engine-state" id="engineState" data-nav="settings" data-anchor="engine"></button>
+        <button class="engine-state" id="engineState" data-settings="engine" aria-haspopup="dialog"></button>
       </div>
     </aside>
 
@@ -163,184 +163,6 @@
         </div>
       </section>
 
-      <section class="view view-settings" data-view="settings" hidden>
-        <header class="view-head">
-          <div><h1>Settings</h1><p class="view-sub">Changes save as you make them.</p></div>
-          <span class="saved" id="savedFlag" aria-live="polite"></span>
-        </header>
-        <div class="settings-scroll">
-          <div class="settings">
-            <h2 id="set-playback">Playback</h2>
-            <div class="group">
-              <div class="setting">
-                <div><strong>Crossfade</strong><span id="xfNote">Off. The next song is always loaded ahead, so songs play back to back with no gap.</span></div>
-                <div class="slider-row"><input type="range" class="range" id="xfRange" min="0" max="12" step="1" value="0" aria-label="Crossfade length" /><span class="slider-val" id="xfVal">Off</span></div>
-              </div>
-              <label class="setting"><div><strong>Even out volume</strong><span>Plays quiet and loud songs at a similar level, like streaming apps do. Each song is measured once; your files aren't changed.</span></div><input type="checkbox" class="switch" id="levelToggle" /></label>
-            </div>
-
-            <h2 id="set-files">Files</h2>
-            <div class="group">
-              <div class="setting">
-                <div><strong>Save to</strong><span id="setDir"></span></div>
-                <button class="btn" id="setDirBtn">Change…</button>
-              </div>
-              <label class="setting"><div><strong>Prefer official audio</strong><span>When you save only the sound of a YouTube music video, use the artist's official audio upload if there is one, since videos often have intros, effects or a different mix.</span></div><input type="checkbox" class="switch" data-key="preferOfficialAudio" /></label>
-              <label class="setting"><div><strong>Give albums and playlists their own folder</strong><span>Albums go in Albums, playlists in Playlists (so they show up as playlists), and single songs in Tracks.</span></div><input type="checkbox" class="switch" data-key="collectionFolders" /></label>
-              <label class="setting"><div><strong>Number tracks in albums and playlists</strong><span>Keeps files sorted in their original order.</span></div><input type="checkbox" class="switch" data-key="numberTracks" /></label>
-              <div class="setting stack">
-                <div><strong>File names</strong><span>Click a token to add it. Preview: <code id="templatePreview"></code></span></div>
-                <input class="text" data-key="filenameTemplate" id="templateInput" spellcheck="false" />
-                <div class="tokens" id="tokens"></div>
-              </div>
-              <label class="setting"><div><strong>Skip anything downloaded before</strong><span>Remembers what you've saved, even after files are moved.</span></div><input type="checkbox" class="switch" data-key="skipDownloaded" /></label>
-              <div class="setting">
-                <div><strong>Downloads at once</strong><span>Albums and playlists always start in track order.</span></div>
-                <div class="stepper"><button type="button" data-step="-1" aria-label="Fewer">−</button><output id="concValue">3</output><button type="button" data-step="1" aria-label="More">+</button></div>
-              </div>
-            </div>
-
-            <h2 id="set-library">Library</h2>
-            <div class="group" id="libFolders"></div>
-            <div class="group gap-top">
-              <div class="setting"><div><strong>Playlist folders live in</strong><span id="playlistsDir"></span></div></div>
-              <label class="setting"><div><strong>Find artist photos, bios and logos</strong><span>Looks up artist names on Deezer, Wikipedia, Wikidata and TheAudioDB, which need no account or key. Nothing else is sent, and you can change or remove anything on an artist's page.</span></div><input type="checkbox" class="switch" data-key="artistInfo" /></label>
-              <div class="setting" id="hiddenSongs"></div>
-              <label class="setting"><div><strong>Copy songs into playlists</strong><span>Off: songs are hard-linked, so they appear in the folder without using extra space (same drive only). On: real copies, which are best for syncing to phones and USB drives.</span></div><input type="checkbox" class="switch" data-key="playlistCopy" /></label>
-            </div>
-
-            <h2 id="set-lyrics">Lyrics</h2>
-            <p class="set-note">Sources are tried top to bottom until synced lyrics are found. Reorder them with the arrows.</p>
-            <div class="group" id="lyricsProviders"></div>
-            <div class="group gap-top">
-              <div class="setting"><div><strong>Musixmatch API key</strong><span>A developer API key from developer.musixmatch.com (free tier available). Stays on this device.</span></div><input class="text" type="password" data-key="musixmatchKey" placeholder="Not set" spellcheck="false" autocomplete="off" /></div>
-              <label class="setting"><div><strong>Soft focus around the current line</strong><span>Blurs synced lyrics more the further they are from what's being sung. Hover any line to read it clearly.</span></div><input type="checkbox" class="switch" id="lyricsBlurToggle" /></label>
-              <label class="setting"><div><strong>Save lyrics with downloads</strong><span>Writes a synced .lrc file next to each song you download, when lyrics are found.</span></div><input type="checkbox" class="switch" data-key="lyricsOnDownload" /></label>
-            </div>
-            <h2 class="sub">Custom sources</h2>
-            <div class="group" id="customProviders"></div>
-
-            <h2 id="set-tags">Tags</h2>
-            <div class="group">
-              <label class="setting"><div><strong>Write metadata and cover art</strong><span>Title, artist, album, track number, date and artwork, plus any edits you make.</span></div><input type="checkbox" class="switch" data-key="embedMetadata" /></label>
-              <label class="setting"><div><strong>Keep chapters</strong><span>When the source has them (mixes, long videos).</span></div><input type="checkbox" class="switch" data-key="embedChapters" /></label>
-            </div>
-
-            <h2 id="set-video">Video</h2>
-            <div class="group">
-              <label class="setting"><div><strong>Embed subtitles</strong><span>When available, in these languages:</span></div><input type="checkbox" class="switch" data-key="embedSubtitles" /></label>
-              <div class="setting"><div><strong>Subtitle languages</strong><span>Comma-separated codes, e.g. <code>en,es</code></span></div><input class="text short" data-key="subtitleLangs" spellcheck="false" /></div>
-              <label class="setting"><div><strong>Cut sponsor segments</strong><span>Uses SponsorBlock on YouTube. Audio downloads also drop non-music sections.</span></div><input type="checkbox" class="switch" data-key="sponsorblock" /></label>
-            </div>
-
-            <h2 id="set-engine">Engine</h2>
-            <div class="group" id="engineGroup">
-              <div class="setting tool" id="toolYtdlp"></div>
-              <div class="setting tool" id="toolFfmpeg"></div>
-              <details class="setting advanced">
-                <summary><strong>Use my own copies</strong><span>Point to yt-dlp or ffmpeg you've installed yourself.</span></summary>
-                <div class="adv-fields">
-                  <label><span>yt-dlp path</span><input class="text" data-key="ytdlpPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
-                  <label><span>ffmpeg path</span><input class="text" data-key="ffmpegPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
-                </div>
-              </details>
-            </div>
-
-            <h2 id="set-network">Network &amp; sign-in</h2>
-            <div class="group">
-              <div class="setting signin">
-                <div><strong>Use my browser sign-in</strong><span>Lets Atmosphere reach content your account can already see, like your own private uploads. Your sign-in stays on this computer.</span><p class="signin-status" id="signinStatus" role="status" hidden></p></div>
-                <div class="signin-ctl">
-                  <select data-key="cookiesBrowser" id="signinSelect">
-                    <option value="">Off</option>
-                    <option value="firefox">Firefox</option>
-                    <option value="chrome">Chrome</option>
-                    <option value="edge">Edge</option>
-                    <option value="brave">Brave</option>
-                    <option value="opera">Opera</option>
-                    <option value="vivaldi">Vivaldi</option>
-                    <option value="chromium">Chromium</option>
-                    <option value="file">A cookies.txt file</option>
-                  </select>
-                  <button class="btn" id="signinCheck" type="button"><span class="label">Check</span><span class="spin" aria-hidden="true"></span></button>
-                </div>
-              </div>
-              <div class="setting" id="cookiesFileRow" hidden>
-                <div><strong>Cookies file</strong><span id="cookiesFilePath">Export one in Netscape format from a browser you're signed in to, using a cookies.txt extension.</span></div>
-                <button class="btn" id="cookiesFilePick" type="button">Choose file</button>
-              </div>
-              <div class="setting"><div><strong>Speed limit</strong><span>Blank for no limit. For example <code>2M</code> is 2 MB/s.</span></div><input class="text short" data-key="rateLimit" placeholder="No limit" spellcheck="false" /></div>
-              <div class="setting"><div><strong>Proxy</strong><span>For example <code>socks5://127.0.0.1:1080</code></span></div><input class="text" data-key="proxy" placeholder="None" spellcheck="false" /></div>
-            </div>
-
-            <h2 id="set-app">App</h2>
-            <div class="group">
-              <div class="setting"><div><strong>Updates</strong><span id="updateInfo">Atmosphere</span></div><button class="btn" id="updateBtn" type="button"><span class="label">Check for updates</span><span class="spin" aria-hidden="true"></span></button></div>
-              <label class="setting"><div><strong>Check for updates automatically</strong><span>When Atmosphere opens, and every few hours while it's open, it asks its GitHub releases page whether there's a newer version. You choose when to install, and every update is signed and checked first.</span></div><input type="checkbox" class="switch" data-key="checkUpdates" /></label>
-              <div class="setting">
-                <div><strong>Appearance</strong><span>Follows Windows unless you choose.</span></div>
-                <div class="seg" data-seg="theme"><button type="button" data-value="system">System</button><button type="button" data-value="light">Light</button><button type="button" data-value="dark">Dark</button></div>
-              </div>
-              <label class="setting"><div><strong>Offer copied links</strong><span>When you switch to Atmosphere with a link copied, offer to fetch it.</span></div><input type="checkbox" class="switch" data-key="watchClipboard" /></label>
-            </div>
-
-            <h2 id="set-discord">Discord</h2>
-            <div class="group">
-              <label class="setting"><div><strong>Show what you're listening to</strong><span class="api-status" id="discordStatus" role="status">Off. Nothing is shared with Discord.</span></div><input type="checkbox" class="switch" data-key="discordEnabled" id="discordToggle" /></label>
-              <div class="setting discord-opt">
-                <div><strong>Your status says</strong><span>The short line next to your name in member lists, DMs and your friends list, like "Listening to Atmosphere" or "Listening to Rihanna". Your profile card always shows the song, artist, cover and progress.</span></div>
-                <div class="seg" data-seg="discordStatus"><button type="button" data-value="app">Atmosphere</button><button type="button" data-value="artist">Artist</button><button type="button" data-value="song">Song</button></div>
-              </div>
-              <label class="setting discord-opt"><div><strong>Show cover art</strong><span>Your status shows the song's cover, with the Atmosphere logo as a small badge. Discord can only show pictures from the web, so Atmosphere finds the cover on Deezer or Apple Music (only the artist, title and album are sent). If none is found, or this is off, the Atmosphere logo is shown instead.</span></div><input type="checkbox" class="switch" data-key="discordCover" /></label>
-              <label class="setting discord-opt"><div><strong>Keep showing while paused</strong><span>Off: your status clears when you pause and comes back when you press play.</span></div><input type="checkbox" class="switch" data-key="discordPaused" /></label>
-              <details class="setting advanced discord-opt">
-                <summary><strong>Your own Discord app</strong><span>Shows your app's name and art instead, like "Listening to My Music". Leave the ID blank to use Atmosphere's.</span></summary>
-                <div class="adv-fields">
-                  <ol class="discord-steps">
-                    <li>Create an application in the <button class="link" id="discordPortal" type="button">Discord Developer Portal</button>. Its name is what your status shows.</li>
-                    <li>Save the images. Under <strong>Rich Presence › Art Assets</strong>, add <code>atmosphere.png</code> and <code>paused.png</code> without renaming them, and optionally <code>invite-cover.png</code> as the invite cover image.</li>
-                    <li>Paste the <strong>Application ID</strong> from <strong>General Information</strong> here.</li>
-                  </ol>
-                  <div class="discord-assets"><button class="btn" id="discordAssets" type="button"><span class="label">Save the images…</span><span class="spin" aria-hidden="true"></span></button><span class="muted small">You choose the folder. Includes the logo, the paused badge, an invite cover and these steps.</span></div>
-                  <label><span>Application ID</span><input class="text" id="discordClientId" placeholder="Atmosphere's own" inputmode="numeric" spellcheck="false" autocomplete="off" /></label>
-                </div>
-              </details>
-            </div>
-
-            <h2 id="set-api">Connections</h2>
-            <p class="set-note">Let other apps on this computer, like stream overlays, status tools or your own scripts, see what's playing and control Atmosphere. It stays off unless you turn it on.</p>
-            <div class="group">
-              <label class="setting"><div><strong>Let other apps connect</strong><span class="api-status" id="apiStatus" role="status">Off</span></div><input type="checkbox" class="switch" data-key="apiEnabled" id="apiEnabledToggle" /></label>
-              <div class="setting">
-                <div><strong>Access token</strong><span id="apiTokenNote">Apps send this token with every request. It's shown once; Atmosphere keeps only a fingerprint.</span>
-                  <div class="api-token" id="apiTokenBox" hidden><code id="apiTokenValue"></code><button class="btn small" id="apiTokenCopy" type="button">Copy</button><p class="muted small">Copy it now. It won't be shown again.</p></div>
-                </div>
-                <button class="btn" id="apiTokenBtn" type="button">Create token</button>
-              </div>
-              <label class="setting api-scope"><div><strong>See what's playing and browse the library</strong><span>Song details, artwork, playlists and live updates.</span></div><input type="checkbox" class="switch" data-key="apiRead" /></label>
-              <label class="setting api-scope"><div><strong>Control playback and the queue</strong><span>Play, pause, skip, seek, volume and queueing songs.</span></div><input type="checkbox" class="switch" data-key="apiControl" /></label>
-              <label class="setting api-scope"><div><strong>Send links to Get</strong><span>Opens the link in Atmosphere. Nothing is saved until you review and confirm it.</span></div><input type="checkbox" class="switch" data-key="apiLinks" /></label>
-              <div class="setting api-scope"><div><strong>Port</strong><span>Only reachable from this computer. <button class="link" id="apiDocs" type="button">How apps connect</button></span></div><input class="text short" id="apiPort" inputmode="numeric" spellcheck="false" aria-label="API port" /></div>
-            </div>
-
-            <h2 id="set-storage">Storage</h2>
-            <p class="set-note">Temporary files are removed automatically on every launch and exit. Here's everything else Atmosphere keeps.</p>
-            <div class="group" id="storageList"></div>
-            <div class="group">
-              <div class="setting"><div><strong>Back up your data</strong><span>Settings, stats and play counts, liked songs, artist photos and download history in one .zip. Your music isn't included and is never touched.</span></div><button class="btn" id="backupBtn" type="button"><span class="label">Back up</span><span class="spin" aria-hidden="true"></span></button></div>
-              <div class="setting"><div><strong>Restore from a backup</strong><span>Replaces your current settings and stats with the backup's, then restarts Atmosphere.</span></div><button class="btn" id="restoreBtn" type="button">Restore</button></div>
-            </div>
-
-            <h2 id="set-rights">Your responsibility</h2>
-            <div class="group">
-              <div class="setting">
-                <div><strong>Rights acknowledgment</strong><span id="rightsInfo"></span></div>
-                <button class="btn danger-ghost" id="revokeBtn">Withdraw</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
     </main>
   </div>
 
@@ -405,6 +227,213 @@
           <button class="btn primary big" id="obInstall">Set up both</button>
         </div>
       </section>
+    </div>
+  </div>
+
+  <div class="set-wrap" id="settingsModal" hidden>
+    <div class="set-modal" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+      <nav class="set-rail" aria-label="Settings sections">
+        <h2 class="nav-heading">Listening</h2>
+        <button class="nav-item set-tab" type="button" data-tab="playback" aria-controls="setp-playback"><span class="i" data-icon="headphones"></span><span>Playback</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="lyrics" aria-controls="setp-lyrics"><span class="i" data-icon="microphone"></span><span>Lyrics</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="library" aria-controls="setp-library"><span class="i" data-icon="books"></span><span>Library</span></button>
+        <h2 class="nav-heading">Downloads</h2>
+        <button class="nav-item set-tab" type="button" data-tab="downloads" aria-controls="setp-downloads"><span class="i" data-icon="download"></span><span>Downloads</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="network" aria-controls="setp-network"><span class="i" data-icon="world"></span><span>Sign-in &amp; network</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="engine" aria-controls="setp-engine"><span class="i" data-icon="tool"></span><span>Engine</span></button>
+        <h2 class="nav-heading">App</h2>
+        <button class="nav-item set-tab" type="button" data-tab="general" aria-controls="setp-general"><span class="i" data-icon="settings"></span><span>General</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="discord" aria-controls="setp-discord"><span class="i" data-icon="brand-discord"></span><span>Discord</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="connections" aria-controls="setp-connections"><span class="i" data-icon="plug-connected"></span><span>Connections</span></button>
+        <button class="nav-item set-tab" type="button" data-tab="storage" aria-controls="setp-storage"><span class="i" data-icon="database"></span><span>Storage</span></button>
+      </nav>
+      <div class="set-main">
+        <header class="set-head">
+          <div class="set-head-text"><h1 id="setTitle">Settings</h1><span class="saved" id="savedFlag" aria-live="polite"></span></div>
+          <button class="set-close" id="settingsClose" type="button" aria-label="Close settings" title="Close (Esc)"><span class="set-close-x"><span class="i" data-icon="x"></span></span><span class="set-close-key" aria-hidden="true">Esc</span></button>
+        </header>
+        <div class="set-scroll" id="settingsScroll">
+          <div class="settings">
+          <section class="set-panel" id="setp-playback" data-panel="playback" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-playback"></span>
+              <div class="group">
+                <div class="setting">
+                  <div><strong>Crossfade</strong><span id="xfNote">Off. The next song is always loaded ahead, so songs play back to back with no gap.</span></div>
+                  <div class="slider-row"><input type="range" class="range" id="xfRange" min="0" max="12" step="1" value="0" aria-label="Crossfade length" /><span class="slider-val" id="xfVal">Off</span></div>
+                </div>
+                <label class="setting"><div><strong>Even out volume</strong><span>Plays quiet and loud songs at a similar level, like streaming apps do. Each song is measured once; your files aren't changed.</span></div><input type="checkbox" class="switch" id="levelToggle" /></label>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-lyrics" data-panel="lyrics" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-lyrics"></span>
+              <p class="set-note">Sources are tried top to bottom until synced lyrics are found. Reorder them with the arrows.</p>
+              <div class="group" id="lyricsProviders"></div>
+              <div class="group gap-top">
+                <div class="setting"><div><strong>Musixmatch API key</strong><span>A developer API key from developer.musixmatch.com (free tier available). Stays on this device.</span></div><input class="text" type="password" data-key="musixmatchKey" placeholder="Not set" spellcheck="false" autocomplete="off" /></div>
+                <label class="setting"><div><strong>Soft focus around the current line</strong><span>Blurs synced lyrics more the further they are from what's being sung. Hover any line to read it clearly.</span></div><input type="checkbox" class="switch" id="lyricsBlurToggle" /></label>
+                <label class="setting"><div><strong>Save lyrics with downloads</strong><span>Writes a synced .lrc file next to each song you download, when lyrics are found.</span></div><input type="checkbox" class="switch" data-key="lyricsOnDownload" /></label>
+              </div>
+              <h2 class="sub">Custom sources</h2>
+              <div class="group" id="customProviders"></div>
+          </section>
+          <section class="set-panel" id="setp-library" data-panel="library" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-library"></span>
+              <div class="group" id="libFolders"></div>
+              <div class="group gap-top">
+                <div class="setting"><div><strong>Playlist folders live in</strong><span id="playlistsDir"></span></div></div>
+                <label class="setting"><div><strong>Find artist photos, bios and logos</strong><span>Looks up artist names on Deezer, Wikipedia, Wikidata and TheAudioDB, which need no account or key. Nothing else is sent, and you can change or remove anything on an artist's page.</span></div><input type="checkbox" class="switch" data-key="artistInfo" /></label>
+                <div class="setting" id="hiddenSongs"></div>
+                <label class="setting"><div><strong>Copy songs into playlists</strong><span>Off: songs are hard-linked, so they appear in the folder without using extra space (same drive only). On: real copies, which are best for syncing to phones and USB drives.</span></div><input type="checkbox" class="switch" data-key="playlistCopy" /></label>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-downloads" data-panel="downloads" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-downloads"></span>
+              <h2 id="set-files">Files</h2>
+              <div class="group">
+                <div class="setting">
+                  <div><strong>Save to</strong><span id="setDir"></span></div>
+                  <button class="btn" id="setDirBtn">Change…</button>
+                </div>
+                <label class="setting"><div><strong>Prefer official audio</strong><span>When you save only the sound of a YouTube music video, use the artist's official audio upload if there is one, since videos often have intros, effects or a different mix.</span></div><input type="checkbox" class="switch" data-key="preferOfficialAudio" /></label>
+                <label class="setting"><div><strong>Give albums and playlists their own folder</strong><span>Albums go in Albums, playlists in Playlists (so they show up as playlists), and single songs in Tracks.</span></div><input type="checkbox" class="switch" data-key="collectionFolders" /></label>
+                <label class="setting"><div><strong>Number tracks in albums and playlists</strong><span>Keeps files sorted in their original order.</span></div><input type="checkbox" class="switch" data-key="numberTracks" /></label>
+                <div class="setting stack">
+                  <div><strong>File names</strong><span>Click a token to add it. Preview: <code id="templatePreview"></code></span></div>
+                  <input class="text" data-key="filenameTemplate" id="templateInput" spellcheck="false" />
+                  <div class="tokens" id="tokens"></div>
+                </div>
+                <label class="setting"><div><strong>Skip anything downloaded before</strong><span>Remembers what you've saved, even after files are moved.</span></div><input type="checkbox" class="switch" data-key="skipDownloaded" /></label>
+                <div class="setting">
+                  <div><strong>Downloads at once</strong><span>Albums and playlists always start in track order.</span></div>
+                  <div class="stepper"><button type="button" data-step="-1" aria-label="Fewer">−</button><output id="concValue">3</output><button type="button" data-step="1" aria-label="More">+</button></div>
+                </div>
+              </div>
+              <h2 id="set-tags">Tags</h2>
+              <div class="group">
+                <label class="setting"><div><strong>Write metadata and cover art</strong><span>Title, artist, album, track number, date and artwork, plus any edits you make.</span></div><input type="checkbox" class="switch" data-key="embedMetadata" /></label>
+                <label class="setting"><div><strong>Keep chapters</strong><span>When the source has them (mixes, long videos).</span></div><input type="checkbox" class="switch" data-key="embedChapters" /></label>
+              </div>
+              <h2 id="set-video">Video</h2>
+              <div class="group">
+                <label class="setting"><div><strong>Embed subtitles</strong><span>When available, in these languages:</span></div><input type="checkbox" class="switch" data-key="embedSubtitles" /></label>
+                <div class="setting"><div><strong>Subtitle languages</strong><span>Comma-separated codes, e.g. <code>en,es</code></span></div><input class="text short" data-key="subtitleLangs" spellcheck="false" /></div>
+                <label class="setting"><div><strong>Cut sponsor segments</strong><span>Uses SponsorBlock on YouTube. Audio downloads also drop non-music sections.</span></div><input type="checkbox" class="switch" data-key="sponsorblock" /></label>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-network" data-panel="network" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-network"></span>
+              <div class="group">
+                <div class="setting signin">
+                  <div><strong>Use my browser sign-in</strong><span>Lets Atmosphere reach content your account can already see, like your own private uploads. Your sign-in stays on this computer.</span><p class="signin-status" id="signinStatus" role="status" hidden></p></div>
+                  <div class="signin-ctl">
+                    <select data-key="cookiesBrowser" id="signinSelect">
+                      <option value="">Off</option>
+                      <option value="firefox">Firefox</option>
+                      <option value="chrome">Chrome</option>
+                      <option value="edge">Edge</option>
+                      <option value="brave">Brave</option>
+                      <option value="opera">Opera</option>
+                      <option value="vivaldi">Vivaldi</option>
+                      <option value="chromium">Chromium</option>
+                      <option value="file">A cookies.txt file</option>
+                    </select>
+                    <button class="btn" id="signinCheck" type="button"><span class="label">Check</span><span class="spin" aria-hidden="true"></span></button>
+                  </div>
+                </div>
+                <div class="setting" id="cookiesFileRow" hidden>
+                  <div><strong>Cookies file</strong><span id="cookiesFilePath">Export one in Netscape format from a browser you're signed in to, using a cookies.txt extension.</span></div>
+                  <button class="btn" id="cookiesFilePick" type="button">Choose file</button>
+                </div>
+                <div class="setting"><div><strong>Speed limit</strong><span>Blank for no limit. For example <code>2M</code> is 2 MB/s.</span></div><input class="text short" data-key="rateLimit" placeholder="No limit" spellcheck="false" /></div>
+                <div class="setting"><div><strong>Proxy</strong><span>For example <code>socks5://127.0.0.1:1080</code></span></div><input class="text" data-key="proxy" placeholder="None" spellcheck="false" /></div>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-engine" data-panel="engine" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-engine"></span>
+              <div class="group" id="engineGroup">
+                <div class="setting tool" id="toolYtdlp"></div>
+                <div class="setting tool" id="toolFfmpeg"></div>
+                <details class="setting advanced">
+                  <summary><strong>Use my own copies</strong><span>Point to yt-dlp or ffmpeg you've installed yourself.</span></summary>
+                  <div class="adv-fields">
+                    <label><span>yt-dlp path</span><input class="text" data-key="ytdlpPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
+                    <label><span>ffmpeg path</span><input class="text" data-key="ffmpegPath" placeholder="Managed by Atmosphere" spellcheck="false" /></label>
+                  </div>
+                </details>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-general" data-panel="general" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-app"></span>
+              <div class="group">
+                <div class="setting"><div><strong>Updates</strong><span id="updateInfo">Atmosphere</span></div><button class="btn" id="updateBtn" type="button"><span class="label">Check for updates</span><span class="spin" aria-hidden="true"></span></button></div>
+                <label class="setting"><div><strong>Check for updates automatically</strong><span>When Atmosphere opens, and every few hours while it's open, it asks its GitHub releases page whether there's a newer version. You choose when to install, and every update is signed and checked first.</span></div><input type="checkbox" class="switch" data-key="checkUpdates" /></label>
+                <div class="setting">
+                  <div><strong>Appearance</strong><span>Follows Windows unless you choose.</span></div>
+                  <div class="seg" data-seg="theme"><button type="button" data-value="system">System</button><button type="button" data-value="light">Light</button><button type="button" data-value="dark">Dark</button></div>
+                </div>
+                <label class="setting"><div><strong>Offer copied links</strong><span>When you switch to Atmosphere with a link copied, offer to fetch it.</span></div><input type="checkbox" class="switch" data-key="watchClipboard" /></label>
+              </div>
+              <h2 id="set-rights">Your responsibility</h2>
+              <div class="group">
+                <div class="setting">
+                  <div><strong>Rights acknowledgment</strong><span id="rightsInfo"></span></div>
+                  <button class="btn danger-ghost" id="revokeBtn">Withdraw</button>
+                </div>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-discord" data-panel="discord" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-discord"></span>
+              <div class="group">
+                <label class="setting"><div><strong>Show what you're listening to</strong><span class="api-status" id="discordStatus" role="status">Off. Nothing is shared with Discord.</span></div><input type="checkbox" class="switch" data-key="discordEnabled" id="discordToggle" /></label>
+                <div class="setting discord-opt">
+                  <div><strong>Your status says</strong><span>The short line next to your name in member lists, DMs and your friends list, like "Listening to Atmosphere" or "Listening to Rihanna". Your profile card always shows the song, artist, cover and progress.</span></div>
+                  <div class="seg" data-seg="discordStatus"><button type="button" data-value="app">Atmosphere</button><button type="button" data-value="artist">Artist</button><button type="button" data-value="song">Song</button></div>
+                </div>
+                <label class="setting discord-opt"><div><strong>Show cover art</strong><span>Your status shows the song's cover, with the Atmosphere logo as a small badge. Discord can only show pictures from the web, so Atmosphere finds the cover on Deezer or Apple Music (only the artist, title and album are sent). If none is found, or this is off, the Atmosphere logo is shown instead.</span></div><input type="checkbox" class="switch" data-key="discordCover" /></label>
+                <label class="setting discord-opt"><div><strong>Keep showing while paused</strong><span>Off: your status clears when you pause and comes back when you press play.</span></div><input type="checkbox" class="switch" data-key="discordPaused" /></label>
+                <details class="setting advanced discord-opt">
+                  <summary><strong>Your own Discord app</strong><span>Shows your app's name and art instead, like "Listening to My Music". Leave the ID blank to use Atmosphere's.</span></summary>
+                  <div class="adv-fields">
+                    <ol class="discord-steps">
+                      <li>Create an application in the <button class="link" id="discordPortal" type="button">Discord Developer Portal</button>. Its name is what your status shows.</li>
+                      <li>Save the images. Under <strong>Rich Presence › Art Assets</strong>, add <code>atmosphere.png</code> and <code>paused.png</code> without renaming them, and optionally <code>invite-cover.png</code> as the invite cover image.</li>
+                      <li>Paste the <strong>Application ID</strong> from <strong>General Information</strong> here.</li>
+                    </ol>
+                    <div class="discord-assets"><button class="btn" id="discordAssets" type="button"><span class="label">Save the images…</span><span class="spin" aria-hidden="true"></span></button><span class="muted small">You choose the folder. Includes the logo, the paused badge, an invite cover and these steps.</span></div>
+                    <label><span>Application ID</span><input class="text" id="discordClientId" placeholder="Atmosphere's own" inputmode="numeric" spellcheck="false" autocomplete="off" /></label>
+                  </div>
+                </details>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-connections" data-panel="connections" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-api"></span>
+              <p class="set-note">Let other apps on this computer, like stream overlays, status tools or your own scripts, see what's playing and control Atmosphere. It stays off unless you turn it on.</p>
+              <div class="group">
+                <label class="setting"><div><strong>Let other apps connect</strong><span class="api-status" id="apiStatus" role="status">Off</span></div><input type="checkbox" class="switch" data-key="apiEnabled" id="apiEnabledToggle" /></label>
+                <div class="setting">
+                  <div><strong>Access token</strong><span id="apiTokenNote">Apps send this token with every request. It's shown once; Atmosphere keeps only a fingerprint.</span>
+                    <div class="api-token" id="apiTokenBox" hidden><code id="apiTokenValue"></code><button class="btn small" id="apiTokenCopy" type="button">Copy</button><p class="muted small">Copy it now. It won't be shown again.</p></div>
+                  </div>
+                  <button class="btn" id="apiTokenBtn" type="button">Create token</button>
+                </div>
+                <label class="setting api-scope"><div><strong>See what's playing and browse the library</strong><span>Song details, artwork, playlists and live updates.</span></div><input type="checkbox" class="switch" data-key="apiRead" /></label>
+                <label class="setting api-scope"><div><strong>Control playback and the queue</strong><span>Play, pause, skip, seek, volume and queueing songs.</span></div><input type="checkbox" class="switch" data-key="apiControl" /></label>
+                <label class="setting api-scope"><div><strong>Send links to Get</strong><span>Opens the link in Atmosphere. Nothing is saved until you review and confirm it.</span></div><input type="checkbox" class="switch" data-key="apiLinks" /></label>
+                <div class="setting api-scope"><div><strong>Port</strong><span>Only reachable from this computer. <button class="link" id="apiDocs" type="button">How apps connect</button></span></div><input class="text short" id="apiPort" inputmode="numeric" spellcheck="false" aria-label="API port" /></div>
+              </div>
+          </section>
+          <section class="set-panel" id="setp-storage" data-panel="storage" aria-labelledby="setTitle" hidden>
+            <span class="set-anchor" id="set-storage"></span>
+              <p class="set-note">Temporary files are removed automatically on every launch and exit. Here's everything else Atmosphere keeps.</p>
+              <div class="group" id="storageList"></div>
+              <div class="group">
+                <div class="setting"><div><strong>Back up your data</strong><span>Settings, stats and play counts, liked songs, artist photos and download history in one .zip. Your music isn't included and is never touched.</span></div><button class="btn" id="backupBtn" type="button"><span class="label">Back up</span><span class="spin" aria-hidden="true"></span></button></div>
+                <div class="setting"><div><strong>Restore from a backup</strong><span>Replaces your current settings and stats with the backup's, then restarts Atmosphere.</span></div><button class="btn" id="restoreBtn" type="button">Restore</button></div>
+              </div>
+          </section>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

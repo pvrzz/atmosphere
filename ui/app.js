@@ -380,12 +380,9 @@ function progressBar(fraction, cls = "") {
 /* shell & navigation */
 function bindShell() {
   bindOnboarding();
-  $$("[data-nav]").forEach((b) =>
-    b.addEventListener("click", () => {
-      go(b.dataset.nav);
-      if (b.dataset.anchor) $(`#set-${b.dataset.anchor}`)?.scrollIntoView({ block: "start" });
-    })
-  );
+  $$("[data-nav]").forEach((b) => b.addEventListener("click", () => go(b.dataset.nav)));
+  $$("[data-settings]").forEach((b) => b.addEventListener("click", () => openSettings(b.dataset.settings || null)));
+  bindSettingsModal();
   $("#clearFetched").addEventListener("click", () => {
     state.collections.forEach((c) => invoke("forget", { id: c.data.id }));
     state.collections = [];
@@ -438,6 +435,8 @@ function bindShell() {
 }
 
 function go(view) {
+  if (view === "settings") return openSettings();
+  if (settingsOpen()) closeSettings(false);
   $$(".nav-item[data-nav]").forEach((b) => b.dataset.nav === view ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   if (state.view === view) return markLibNav();
   state.view = view;
@@ -446,7 +445,6 @@ function go(view) {
   closeMenus();
   if (view !== "library") closeDrawers();
   if (view === "downloads") renderDownloads(true);
-  if (view === "settings") renderSettings();
   markLibNav();
 }
 
@@ -455,6 +453,10 @@ function onKey(e) {
   if (mod && e.key.toLowerCase() === "k") {
     e.preventDefault();
     openSearch();
+  } else if (mod && e.key === ",") {
+    e.preventDefault();
+    if (settingsOpen()) closeSettings();
+    else if (state.settings?.rightsAccepted) openSettings();
   } else if (mod && e.key.toLowerCase() === "l") {
     e.preventDefault();
     go("get");
@@ -1485,6 +1487,80 @@ async function patch(p) {
   }
 }
 
+/* the settings modal opens over whatever you were doing and comes back on the tab (and scroll spot) you left */
+const SET_TAB_KEY = "atmo.settingsTab";
+const SetUI = { tab: "playback", opener: null, scroll: {}, downOnScrim: false };
+try { SetUI.tab = localStorage.getItem(SET_TAB_KEY) || SetUI.tab; } catch {}
+
+const settingsOpen = () => !$("#settingsModal").hidden;
+
+function openSettings(tab) {
+  if (!state.settings?.rightsAccepted) return;
+  const wrap = $("#settingsModal");
+  if (tab && $(`.set-panel[data-panel="${tab}"]`)) SetUI.tab = tab;
+  if (!$(`.set-panel[data-panel="${SetUI.tab}"]`)) SetUI.tab = "playback";
+  if (wrap.hidden) {
+    SetUI.opener = document.activeElement;
+    closeSaveMenu();
+    closeMenus();
+    wrap.hidden = false;
+    $("#shell").setAttribute("inert", "");
+    $("#player").setAttribute("inert", "");
+    $("#settingsBtn").setAttribute("aria-expanded", "true");
+  }
+  renderSettings();
+  showSetTab(SetUI.tab, !!tab);
+  $(`.set-tab[data-tab="${SetUI.tab}"]`)?.focus({ preventScroll: true });
+}
+
+function closeSettings(restoreFocus = true) {
+  const wrap = $("#settingsModal");
+  if (wrap.hidden) return;
+  SetUI.scroll[SetUI.tab] = $("#settingsScroll").scrollTop;
+  wrap.hidden = true;
+  if ($("#onboarding").hidden) $("#shell").removeAttribute("inert");
+  $("#player").removeAttribute("inert");
+  $("#settingsBtn").setAttribute("aria-expanded", "false");
+  if (restoreFocus && SetUI.opener?.isConnected) SetUI.opener.focus({ preventScroll: true });
+}
+
+function showSetTab(tab, fresh = false) {
+  const scroller = $("#settingsScroll");
+  if (!$("#settingsModal").hidden && SetUI.tab !== tab) SetUI.scroll[SetUI.tab] = scroller.scrollTop;
+  SetUI.tab = tab;
+  try { localStorage.setItem(SET_TAB_KEY, tab); } catch {}
+  $$(".set-tab").forEach((b) => (b.dataset.tab === tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current")));
+  $(`.set-tab[data-tab="${tab}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  $$(".set-panel").forEach((p) => (p.hidden = p.dataset.panel !== tab));
+  $("#setTitle").textContent = $(`.set-tab[data-tab="${tab}"]`)?.textContent.trim() || "Settings";
+  scroller.scrollTop = fresh ? 0 : SetUI.scroll[tab] || 0;
+}
+
+function bindSettingsModal() {
+  const wrap = $("#settingsModal");
+  $$(".set-tab").forEach((b) => b.addEventListener("click", () => showSetTab(b.dataset.tab, false)));
+  $(".set-rail").addEventListener("keydown", (e) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const tabs = $$(".set-tab");
+    const at = tabs.indexOf(document.activeElement);
+    if (at < 0) return;
+    e.preventDefault();
+    const to = e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+    tabs[to].focus();
+    showSetTab(tabs[to].dataset.tab);
+  });
+  $("#settingsClose").addEventListener("click", () => closeSettings());
+  wrap.addEventListener("mousedown", (e) => (SetUI.downOnScrim = e.target === wrap));
+  wrap.addEventListener("click", (e) => { if (e.target === wrap && SetUI.downOnScrim) closeSettings(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || wrap.hidden || $(".modal-wrap, .qs-wrap, #tv:not([hidden])")) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if ($(".menu.ctx")) closeMenus();
+    else closeSettings();
+  }, true);
+}
+
 const TOKENS = ["{artist}", "{title}", "{album}", "{albumartist}", "{index}", "{year}", "{genre}", "{collection}", "{platform}"];
 function bindSettings() {
   $$("[data-key]").forEach((el) => {
@@ -1518,6 +1594,7 @@ function bindSettings() {
   });
   $("#revokeBtn").addEventListener("click", async () => {
     state.settings = await invoke("revoke_rights");
+    closeSettings(false);
     $$(".pledge-check").forEach((c) => (c.checked = false));
     $("#obAccept").disabled = true;
     showOnboarding(1);
