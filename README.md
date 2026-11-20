@@ -141,7 +141,7 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - **Portable:** `atmosphere.exe` runs from any folder. Put an empty file named `portable` next to it, and all data stays beside it.
 - **Tidy:** temp files and stalled partial downloads are cleared automatically on launch, whenever downloads finish, and on exit. **Settings → Storage** shows what Atmosphere keeps and lets you clean it up.
 - **Back up and restore** your settings, stats, liked songs and artist photos as a single `.zip` from **Settings → Storage**.
-- **Automatic updates:** Atmosphere checks this repo's releases and offers each new version with its notes. Updates are signed and verified before they install. You can turn checking off in Settings.
+- **Automatic updates:** Atmosphere checks this repo's releases when it opens and every few hours while it's open. When there's a new version, a notice shows what's new with **Update and restart**: one click downloads it, verifies its signature, installs it and reopens Atmosphere where you left off. You can turn checking off in Settings.
 - **Clean uninstall:** the Windows uninstaller keeps your data by default. If you choose to delete it, you're offered a backup first. Your music files are never touched.
 
 ## Get started

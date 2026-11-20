@@ -1,5 +1,6 @@
 // atmosphere · updates.js · Update chip, what's-new dialog and install progress for signed GitHub releases
-const Upd = { info: null, app: null, busy: false };
+const Upd = { info: null, app: null, busy: false, checkedAt: 0 };
+const UPDATE_EVERY = 6 * 3600 * 1000;
 
 async function checkUpdates(manual = false) {
   const btn = $("#updateBtn");
@@ -8,8 +9,10 @@ async function checkUpdates(manual = false) {
     btn.disabled = true;
   }
   try {
+    Upd.checkedAt = Date.now();
     Upd.info = await invoke("update_check");
     renderUpdate();
+    if (!manual) updateNotice();
     if (manual) {
       if (Upd.info) openUpdate();
       else toast("You're on the latest version.", "ok");
@@ -36,6 +39,29 @@ function renderUpdate() {
       ? `Atmosphere ${Upd.app.version}. Version ${Upd.info.version} is available.`
       : `Atmosphere ${Upd.app.version}${Upd.app.canSelfUpdate ? "" : ". This copy updates by downloading the new version."}`;
   }
+}
+
+function noticedVersion() {
+  try { return localStorage.getItem("atmo.updateNoticed"); } catch { return null; }
+}
+
+function updateNotice() {
+  const u = Upd.info;
+  if (!u || Upd.busy || $("#updateNotice") || noticedVersion() === u.version || (typeof Mini !== "undefined" && Mini.on)) return;
+  try { localStorage.setItem("atmo.updateNoticed", u.version); } catch {}
+  const first = (u.notes || "").split("\n").map((l) => l.replace(/^[-*#\s]+/, "").trim()).find(Boolean);
+  const close = () => {
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 200);
+  };
+  const el = h("div", { class: "update-notice", id: "updateNotice", role: "status" },
+    h("span", { class: "un-icon" }, icon("sparkles")),
+    h("div", { class: "un-text" }, h("strong", {}, `Atmosphere ${u.version} is out`), h("span", {}, first || "A new version is ready to install.")),
+    h("div", { class: "un-actions" },
+      h("button", { class: "btn small primary", type: "button", onclick: () => { close(); if (u.canInstall) installUpdate(); else invoke("open_link", { url: u.page }).catch(() => {}); } }, u.canInstall ? "Update and restart" : "Download"),
+      h("button", { class: "btn small", type: "button", onclick: () => { close(); openUpdate(); } }, "What's new")),
+    h("button", { class: "icon-btn un-close", type: "button", "aria-label": "Not now", title: "Not now. It stays in the sidebar.", onclick: close }, icon("x")));
+  document.body.append(el);
 }
 
 async function openUpdate() {
@@ -82,5 +108,8 @@ async function bindUpdates() {
   renderUpdate();
   $("#updateBtn")?.addEventListener("click", () => (Upd.info ? openUpdate() : checkUpdates(true)));
   $("#updateChip")?.addEventListener("click", openUpdate);
-  if (state.settings?.checkUpdates !== false) setTimeout(() => checkUpdates(false), 5000);
+  const auto = () => state.settings?.checkUpdates !== false && !Upd.busy;
+  if (auto()) setTimeout(() => checkUpdates(false), 5000);
+  setInterval(() => { if (auto() && Date.now() - Upd.checkedAt >= UPDATE_EVERY) checkUpdates(false); }, 15 * 60 * 1000);
+  window.addEventListener("focus", () => { if (auto() && Upd.checkedAt && Date.now() - Upd.checkedAt >= UPDATE_EVERY) checkUpdates(false); });
 }
