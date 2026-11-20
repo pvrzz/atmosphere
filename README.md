@@ -224,13 +224,12 @@ Atmosphere is for media you own or are allowed to keep.
 | `src/direct.rs` | Checks and reads direct audio and video file links |
 | `src/backup.rs` | Backup and restore of settings, stats and liked songs |
 | `src/api.rs` | The opt-in local API for other apps ([guide](docs/api.md)) |
-| `src/updates.rs` | Signed in-app updates from GitHub Releases ([releasing](docs/releasing.md)) |
+| `src/updates.rs` | Signed in-app updates from GitHub Releases |
 | `src/artistinfo.rs` | Artist photos, bios and logos from Deezer, Wikipedia, Wikidata and TheAudioDB |
 | `src/discord.rs` | Discord Rich Presence over Discord's local connection, and its art assets |
 | `src/tagging.rs` | Writes tags, cover art and lyrics into files |
 | `ui/` | The interface in plain HTML, CSS and JS (no build step) |
-| `branding/`, `tools/` | The logo, wordmark lockups and installer art, all generated from code |
-| `site/` | The upcoming website |
+| `branding/` | The Atmosphere wordmark |
 
 ## Acknowledgements
 
