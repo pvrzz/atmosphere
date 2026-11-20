@@ -70,7 +70,6 @@ async function openMini() {
   document.body.classList.add("mini-mode");
   const box = $("#mini");
   box.hidden = false;
-  box.classList.toggle("mac", isMac);
   const win = miniWin();
   const dpi = window.__TAURI__?.dpi;
   if (win && dpi) {

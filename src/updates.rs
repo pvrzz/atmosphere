@@ -19,13 +19,7 @@ pub struct UpdateInfo {
 }
 
 pub fn can_self_update() -> bool {
-    if crate::engine::portable_root().is_some() {
-        return false;
-    }
-    if cfg!(target_os = "linux") {
-        return std::env::var_os("APPIMAGE").is_some();
-    }
-    true
+    crate::engine::portable_root().is_none()
 }
 
 #[tauri::command]
@@ -44,7 +38,7 @@ pub async fn update_check(app: AppHandle) -> CmdResult<Option<UpdateInfo>> {
     Ok(found.map(|u| UpdateInfo {
         version: u.version.clone(),
         current: u.current_version.clone(),
-        notes: u.body.clone().filter(|b| !b.trim().is_empty()),
+        notes: u.body.as_deref().map(|b| b.split("<!-- install-notes -->").next().unwrap_or(b).trim().to_string()).filter(|b| !b.is_empty()),
         date: u.date.map(|d| d.to_string()),
         can_install: can_self_update(),
         page: RELEASES.into(),

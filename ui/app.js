@@ -20,8 +20,6 @@ function h(tag, attrs = {}, ...kids) {
   return el;
 }
 const icon = (name) => h("span", { class: "i", icon: name });
-const isMac = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent);
-const platformKeys = () => isMac && $$("kbd").forEach((k) => (k.textContent = k.textContent.replace(/^Ctrl /, "⌘ ")));
 const hydrate = (root = document) => $$("[data-icon]", root).forEach((el) => (el.innerHTML = svg(el.dataset.icon)));
 
 const KIND = { album: "Album", ep: "EP", single: "Single", lp: "LP", compilation: "Compilation", mixtape: "Mixtape", playlist: "Playlist", profile: "Profile", channel: "Channel", search: "Search results", track: "Track" };
@@ -93,6 +91,16 @@ function toast(message, kind = "") {
     t.classList.add("out");
     setTimeout(() => t.remove(), 220);
   }, kind === "err" ? 6500 : 3000);
+}
+
+function placeFloating(el, x, y, above = false) {
+  const pad = 8;
+  el.style.maxHeight = `${Math.max(120, innerHeight - pad * 2)}px`;
+  el.style.maxWidth = `${innerWidth - pad * 2}px`;
+  el.style.overflowY = "auto";
+  const w = el.offsetWidth, hgt = el.offsetHeight;
+  el.style.left = `${Math.max(pad, Math.min(x, innerWidth - w - pad))}px`;
+  el.style.top = `${Math.max(pad, Math.min(above ? y - hgt : y, innerHeight - hgt - pad))}px`;
 }
 
 function art(url, cls, alt = "", ph = "music") {
@@ -195,8 +203,6 @@ function bindSidebar() {
 
 function bindWindow() {
   const bar = $("#titlebar");
-  document.documentElement.classList.toggle("mac", isMac);
-  if (isMac) bar.classList.add("mac");
   const api = window.__TAURI__.window;
   if (!api?.getCurrentWindow) return;
   const win = api.getCurrentWindow();
@@ -222,7 +228,6 @@ function bindWindow() {
 /* boot */
 async function init() {
   hydrate();
-  platformKeys();
   bindWindow();
   bindSidebar();
   state.settings = await invoke("get_settings");
@@ -311,7 +316,7 @@ function renderObTools() {
   if (!t) return;
   $("#obTools").replaceChildren(
     toolRow("ytdlp", t.ytdlp, "yt-dlp", "Reads links and downloads media (about 18 MB)."),
-    toolRow("ffmpeg", t.ffmpeg, "ffmpeg", t.canInstallFfmpeg ? "Converts formats and writes tags (about 90 MB)." : isMac ? "Run brew install ffmpeg in Terminal; Atmosphere finds it." : "Install it with your package manager.")
+    toolRow("ffmpeg", t.ffmpeg, "ffmpeg", "Converts formats and writes tags (about 90 MB).")
   );
   $("#obInstall").textContent = t.ytdlp.path && t.ffmpeg.path ? "Continue" : "Set up both";
 }
@@ -860,9 +865,8 @@ function openTypeMenu(anchor, c) {
     h("div", { class: "menu-note" }, "Albums, EPs and singles get album tags and track numbers.")
   );
   const r = anchor.getBoundingClientRect();
-  menu.style.left = `${r.left}px`;
-  menu.style.top = `${r.bottom + 6}px`;
   menu.hidden = false;
+  placeFloating(menu, r.left, r.bottom + 6);
   menu.querySelector("button")?.focus();
 }
 
@@ -1148,8 +1152,7 @@ function openSaveMenu() {
   $("#saveAsBtn").setAttribute("aria-expanded", "true");
   renderSaveMenu();
   const r = $("#saveAsBtn").getBoundingClientRect();
-  menu.style.left = `${r.left}px`;
-  menu.style.top = `${Math.max(12, r.top - menu.offsetHeight - 8)}px`;
+  placeFloating(menu, r.left, r.top - 8, true);
   menu.querySelector(".opt[aria-checked='true']")?.focus();
 }
 
@@ -1556,8 +1559,6 @@ function renderSettings() {
   renderStorage();
 }
 
-const OS = isMac ? "mac" : /Linux|X11/.test(navigator.userAgent) ? "linux" : "windows";
-
 function signinStatus(text, kind) {
   const el = $("#signinStatus");
   if (!el) return;
@@ -1570,7 +1571,6 @@ function renderSignin() {
   const s = state.settings;
   const sel = $("#signinSelect");
   if (!s || !sel) return;
-  $$("option[data-os]", sel).forEach((o) => (o.hidden = o.dataset.os !== OS && o.value !== s.cookiesBrowser));
   const isFile = s.cookiesBrowser === "file";
   $("#cookiesFileRow").hidden = !isFile;
   $("#signinCheck").hidden = !s.cookiesBrowser;
@@ -1628,7 +1628,7 @@ function renderToolSettings() {
     return [h("div", {}, h("strong", { class: "name" }, h("span", { class: `dot ${tool.path ? "ok" : "warn"}` }), name), h("span", {}, status)), acts];
   };
   $("#toolYtdlp").replaceChildren(...card("ytdlp", t.ytdlp, "yt-dlp", "Not installed. Needed to read any link."));
-  $("#toolFfmpeg").replaceChildren(...card("ffmpeg", t.ffmpeg, "ffmpeg", t.canInstallFfmpeg ? "Not installed. Needed for MP3, M4A, FLAC, WAV, video and cover art." : isMac ? "Install it with Homebrew (brew install ffmpeg). Atmosphere finds it automatically." : "Install it with your package manager, then restart."));
+  $("#toolFfmpeg").replaceChildren(...card("ffmpeg", t.ffmpeg, "ffmpeg", "Not installed. Needed for MP3, M4A, FLAC, WAV, video and cover art."));
 }
 
 window.addEventListener("DOMContentLoaded", () => init().catch((e) => toast(errText(e), "err")));

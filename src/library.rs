@@ -1048,6 +1048,14 @@ impl Library {
 mod tests {
     use super::*;
 
+    static DATA_DIR: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn own_data_dir(root: &Path) -> std::sync::MutexGuard<'static, ()> {
+        let guard = DATA_DIR.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        guard
+    }
+
     #[test]
     fn finds_playlist_membership() {
         let root = Path::new("/music/Playlists");
@@ -1089,7 +1097,7 @@ mod tests {
     #[test]
     fn hide_restore_and_folder_removal() {
         let root = std::env::temp_dir().join(format!("atmo-lib-{}", now()));
-        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let _data = own_data_dir(&root);
         let music = root.join("music");
         let lists = music.join("Playlists");
         wav(&music.join("Album A").join("one.wav"), 2);
@@ -1114,7 +1122,7 @@ mod tests {
     #[test]
     fn linked_folders_link_go_missing_relocate_and_unlink() {
         let root = std::env::temp_dir().join(format!("atmo-link-{}-{}", std::process::id(), now()));
-        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let _data = own_data_dir(&root);
         let lists = root.join("Playlists");
         std::fs::create_dir_all(lists.join("Gym")).unwrap();
         let mine = root.join("Elsewhere").join("Gym");
@@ -1152,7 +1160,7 @@ mod tests {
     #[test]
     fn moving_the_music_folder_keeps_likes_and_plays() {
         let root = std::env::temp_dir().join(format!("atmo-remap-{}-{}", std::process::id(), now()));
-        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let _data = own_data_dir(&root);
         let (old, new) = (root.join("old"), root.join("new"));
         wav(&old.join("Albums").join("one.wav"), 2);
         let lib = Library::load();
@@ -1174,7 +1182,7 @@ mod tests {
     #[test]
     fn moving_one_song_keeps_its_likes_and_plays() {
         let root = std::env::temp_dir().join(format!("atmo-remap1-{}-{}", std::process::id(), now()));
-        std::env::set_var("ATMOSPHERE_DATA_DIR", root.join("data"));
+        let _data = own_data_dir(&root);
         let (from, to) = (root.join("Tracks").join("one.wav"), root.join("Albums").join("A").join("one.wav"));
         wav(&from, 2);
         wav(&root.join("Tracks").join("two.wav"), 2);
@@ -1186,7 +1194,7 @@ mod tests {
         std::fs::rename(&from, &to).unwrap();
         let new_id = lib.remap_file(&from, &to).unwrap();
         let snap = lib.snapshot(&root.join("Playlists"));
-        assert_eq!(snap.tracks.len(), 2);
+        assert_eq!(snap.tracks.iter().filter(|t| Path::new(&t.path).starts_with(&root)).count(), 2);
         assert!(snap.liked.contains(&new_id));
         assert!(snap.tracks.iter().any(|t| t.path.ends_with("two.wav")));
         let _ = std::fs::remove_dir_all(&root);

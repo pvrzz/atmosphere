@@ -19,17 +19,21 @@ const Lib = {
 };
 
 const lnorm = (s) => (s || "").trim().toLowerCase();
+function splitList(s) {
+  return (s || "").trim().split(/\s*(?:,|;|\s(?:feat\.?|ft\.?|featuring)\s|^(?:feat\.?|ft\.?)\s)\s*/i).map((p) => p.trim()).filter(Boolean);
+}
 function splitNames(s) {
-  const text = (s || "").trim();
-  let parts = text.split(/\s*(?:,|;|\s(?:feat\.?|ft\.?|featuring)\s|^(?:feat\.?|ft\.?)\s)\s*/i);
-  if (/,/.test(text)) parts = parts.flatMap((p) => p.split(/\s+&\s+/));
-  return parts.map((p) => p.trim()).filter(Boolean);
+  return splitList(s).flatMap((p) => {
+    if (!/\s&\s/.test(p)) return [p];
+    const pieces = p.split(/\s+&\s+/).map((x) => x.trim()).filter(Boolean);
+    return pieces.length > 1 && pieces.every((x) => Lib.solo?.has(lnorm(x))) ? pieces : [p];
+  });
 }
 function titleCredits(title) {
   const t = title || "";
   const inBrackets = [...t.matchAll(/[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^\)\]]+)[\)\]]/gi)].map((m) => m[1]);
   const trailing = t.match(/\s(?:feat\.?|ft\.?|featuring)\s+([^\(\[]+)$/i);
-  return [...inBrackets, trailing?.[1]].filter(Boolean).flatMap((x) => splitNames(x.replace(/,?\s+&\s+/g, ", ")));
+  return [...inBrackets, trailing?.[1]].filter(Boolean).flatMap((x) => splitNames(x));
 }
 const primaryArtist = (s) => splitNames(s)[0] || "Unknown artist";
 const artistsOf = (t) => {
@@ -51,6 +55,8 @@ function buildIndexes(snap) {
   Lib.byId = new Map(snap.tracks.map((t) => [t.id, t]));
   Lib.liked = new Set(snap.liked);
   Lib.plays = snap.plays || {};
+  Lib.solo = new Set();
+  for (const t of snap.tracks) for (const n of [t.albumArtist, ...splitList(t.artist)]) if (n && !/\s&\s/.test(n)) Lib.solo.add(lnorm(n));
   const main = new Set(snap.tracks.filter((t) => !t.playlist).map(sig));
   Lib.songs = snap.tracks.filter((t) => !t.playlist || !main.has(sig(t)));
   const albums = new Map();
@@ -261,14 +267,14 @@ async function deleteTracks(tracks) {
   const box = h("input", { type: "checkbox", class: "box" });
   box.checked = true;
   const body = h("div", { class: "stack" },
-    h("p", { class: "muted" }, `${tracks.length === 1 ? `“${tracks[0].title}”` : songs(tracks.length)} will be moved to your ${isMac ? "Trash" : "Recycle Bin"}, along with any lyrics files, so you can restore them from there if you change your mind.`),
+    h("p", { class: "muted" }, `${tracks.length === 1 ? `“${tracks[0].title}”` : songs(tracks.length)} will be moved to your Recycle Bin, along with any lyrics files, so you can restore them from there if you change your mind.`),
     inPlaylists ? h("label", { class: "check-row" }, box, h("span", {}, "Also remove them from your playlists")) : null);
   const ok = await modal(tracks.length === 1 ? "Delete this song from your device?" : `Delete ${tracks.length} songs from your device?`, body, [{ label: "Cancel", value: false }, { label: "Delete", value: true, primary: true }]);
   if (!ok) return;
   try {
     const n = await invoke("tracks_delete", { ids: tracks.map((t) => t.id), playlists: inPlaylists && box.checked });
     Lib.sel.clear();
-    toast(`Deleted ${songs(n)}. ${isMac ? "Trash" : "Recycle Bin"} has them if you need them back.`, "ok");
+    toast(`Deleted ${songs(n)}. Recycle Bin has them if you need them back.`, "ok");
   } catch (e) {
     toast(errText(e), "err");
   }
@@ -309,7 +315,7 @@ function closeMenus() {
   $$(".ctx").forEach((m) => m.remove());
 }
 
-function menuAt(x, y, items) {
+function menuAt(x, y, items, above = false) {
   closeMenus();
   const m = h("div", { class: "menu ctx", role: "menu" });
   for (const it of items) {
@@ -317,9 +323,7 @@ function menuAt(x, y, items) {
     else if (it) m.append(h("button", { role: "menuitem", class: `${it.sub ? "has-sub" : ""} ${it.danger ? "danger" : ""}`, disabled: it.disabled, onclick: (e) => { if (it.sub) { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); menuAt(r.right + 4, r.top - 6, it.sub()); } else { closeMenus(); it.run(); } } }, h("span", {}, it.label), it.sub ? icon("chevron-down") : it.hint ? h("kbd", {}, it.hint) : null));
   }
   document.body.append(m);
-  const w = m.offsetWidth, hgt = m.offsetHeight;
-  m.style.left = `${Math.min(x, innerWidth - w - 8)}px`;
-  m.style.top = `${Math.min(y, innerHeight - hgt - 8)}px`;
+  placeFloating(m, x, y, above);
   m.querySelector("button")?.focus();
   return m;
 }
@@ -411,10 +415,10 @@ async function addToPlaylist(name, tracks) {
 
 async function removeFromPlaylist(name, tracks) {
   const pl = (Lib.data?.playlists || []).find((x) => x.name === name);
-  const bin = isMac ? "Trash" : "Recycle Bin";
+  const bin = "Recycle Bin";
   const ok = pl?.linked
     ? await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `This is your own folder, so the file itself moves from it to your ${bin}. If it's the only copy, it leaves your library too. You can restore it from the ${bin}.`, "Move to " + bin)
-    : await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `The playlist's copy goes to your ${isMac ? "Trash" : "Recycle Bin"}. The song stays in your library.`, "Remove");
+    : await confirmBox(`Remove ${tracks.length === 1 ? `“${tracks[0].title}”` : plural(tracks.length, "song")} from ${name}?`, `The playlist's copy goes to your Recycle Bin. The song stays in your library.`, "Remove");
   if (!ok) return;
   try {
     await invoke("playlist_remove", { name, ids: tracks.map((t) => t.id) });
@@ -448,11 +452,11 @@ function modal(title, body, actions) {
     const close = (v) => { wrap.remove(); resolve(v); };
     const wrap = h("div", { class: "modal-wrap", onclick: (e) => { if (e.target === wrap) close(null); } },
       h("div", { class: "modal", role: "dialog", "aria-modal": "true", "aria-label": title },
-        h("h2", {}, title), body,
-        h("div", { class: "row end" }, ...actions.map((a) => h("button", { class: `btn ${a.primary ? "primary" : a.danger ? "danger-ghost" : "ghost"}`, onclick: () => close(a.value) }, a.label)))));
+        h("h2", {}, title), h("div", { class: "modal-body" }, body),
+        h("div", { class: "row end modal-actions" }, ...actions.map((a) => h("button", { class: `btn ${a.primary ? "primary" : a.danger ? "danger-ghost" : "ghost"}`, onclick: () => close(a.value) }, a.label)))));
     wrap.addEventListener("keydown", (e) => {
       if (e.key === "Escape") close(null);
-      if (e.key === "Enter" && e.target.tagName === "INPUT") close(actions.find((a) => a.primary)?.value);
+      if (e.key === "Enter" && e.target.tagName === "INPUT" && !e.defaultPrevented) close(actions.find((a) => a.primary)?.value);
     });
     document.body.append(wrap);
     (wrap.querySelector("input, textarea") || wrap.querySelector(".btn.primary"))?.focus();
@@ -1193,7 +1197,7 @@ function bindLibrary() {
   $$("[data-lib]").forEach((b) => b.addEventListener("click", () => { Lib.back = []; openLib(b.dataset.lib, null, false); }));
   $("#newPlaylistBtn").addEventListener("click", playlistAddMenu);
   $("#libScroll").addEventListener("scroll", () => Lib.drawSongs && requestAnimationFrame(Lib.drawSongs), { passive: true });
-  window.addEventListener("resize", () => Lib.drawSongs && Lib.drawSongs());
+  window.addEventListener("resize", () => { closeMenus(); Lib.drawSongs && Lib.drawSongs(); });
   window.addEventListener("player", (e) => { if (e.detail.type === "track") markPlaying(); });
   window.addEventListener("played", (e) => { Lib.plays[e.detail] = (Lib.plays[e.detail] || 0) + 1; });
   listen("atmosphere://library", (e) => {
@@ -1212,7 +1216,7 @@ function bindLibrary() {
 }
 
 /* app-wide context menus (replaces the browser's own) */
-const MOD = isMac ? "⌘" : "Ctrl+";
+const MOD = "Ctrl+";
 
 function editMenu(e, el) {
   const isInput = el.tagName === "INPUT" || el.tagName === "TEXTAREA";
@@ -1378,7 +1382,7 @@ document.addEventListener("keydown", (e) => {
     return;
   }
   const typing = e.target.closest?.("input, textarea, select, [contenteditable]");
-  if (!typing && state.view === "library" && Lib.sel.size && (e.key === "Delete" || (isMac && e.key === "Backspace" && e.metaKey))) {
+  if (!typing && state.view === "library" && Lib.sel.size && e.key === "Delete") {
     e.preventDefault();
     return deleteTracks(selectedTracks());
   }

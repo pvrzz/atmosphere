@@ -1,6 +1,9 @@
 // atmosphere · main.rs · App entry point: shared state, the rights gate and every command the UI can call.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(not(windows))]
+compile_error!("Atmosphere is a Windows app.");
+
 mod api;
 mod artistinfo;
 mod backup;
@@ -381,7 +384,6 @@ fn parse_hex(color: &str) -> Option<(u8, u8, u8)> {
 #[tauri::command]
 fn frame_color(window: tauri::WebviewWindow, color: String) {
     let Some((r, g, b)) = parse_hex(&color) else { return };
-    #[cfg(windows)]
     if let Ok(hwnd) = window.hwnd() {
         use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR};
         let colorref: u32 = (r as u32) | ((g as u32) << 8) | ((b as u32) << 16);
@@ -389,8 +391,6 @@ fn frame_color(window: tauri::WebviewWindow, color: String) {
             DwmSetWindowAttribute(hwnd.0 as _, DWMWA_BORDER_COLOR as _, &colorref as *const u32 as _, 4);
         }
     }
-    #[cfg(not(windows))]
-    let _ = (window, r, g, b);
 }
 
 #[tauri::command]
@@ -596,17 +596,6 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building atmosphere")
         .run(|app, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Opened { urls } = &event {
-                let files: Vec<String> = urls.iter().filter_map(|u| u.to_file_path().ok()).map(|p| p.to_string_lossy().into_owned()).collect();
-                let files = libcmd::audio_args(files);
-                if !files.is_empty() {
-                    if let Some(state) = app.try_state::<AppState>() {
-                        state.pending_open.lock().unwrap().extend(files.clone());
-                    }
-                    let _ = app.emit("atmosphere://open-files", files);
-                }
-            }
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<AppState>() {
                     state.dl.cancel_all();

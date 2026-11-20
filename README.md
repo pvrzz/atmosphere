@@ -8,11 +8,11 @@
 
 <p align="center">
   <b>Your music, beautifully kept.</b><br>
-  A fast, native music library, player and downloader for Windows, macOS and Linux. 
+  A fast, native music library, player and downloader for Windows.
 </p>
 
 <p align="center">
-  <img alt="Windows · macOS · Linux" src="https://img.shields.io/badge/platform-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-5b63e6?style=flat-square">
+  <img alt="Windows 10 and 11" src="https://img.shields.io/badge/platform-Windows%2010%20%C2%B7%2011-5b63e6?style=flat-square">
   <img alt="Built with Rust and Tauri 2" src="https://img.shields.io/badge/built%20with-Rust%20%2B%20Tauri%202-171a23?style=flat-square&logo=rust">
   <img alt="Engine: yt-dlp and ffmpeg" src="https://img.shields.io/badge/engine-yt--dlp%20%2B%20ffmpeg-171a23?style=flat-square">
   <img alt="Size: about 8 MB" src="https://img.shields.io/badge/app%20size-~8%20MB-171a23?style=flat-square">
@@ -142,32 +142,23 @@ It's built for media you **own or have the rights to keep**, such as your own up
 - **Tidy:** temp files and stalled partial downloads are cleared automatically on launch, whenever downloads finish, and on exit. **Settings → Storage** shows what Atmosphere keeps and lets you clean it up.
 - **Back up and restore** your settings, stats, liked songs and artist photos as a single `.zip` from **Settings → Storage**.
 - **Automatic updates:** Atmosphere checks this repo's releases when it opens and every few hours while it's open. When there's a new version, a notice shows what's new with **Update and restart**: one click downloads it, verifies its signature, installs it and reopens Atmosphere where you left off. You can turn checking off in Settings.
-- **Clean uninstall:** the Windows uninstaller keeps your data by default. If you choose to delete it, you're offered a backup first. Your music files are never touched.
+- **Clean uninstall:** the uninstaller keeps your data by default. If you choose to delete it, you're offered a backup first. Your music files are never touched.
 
 ## Get started
 
 ### Download
-Grab the latest version from [Releases](../../releases/latest). Installed copies keep themselves up to date.
+Grab the latest version from [Releases](../../releases/latest) for Windows 10 or 11: the setup `.exe`, the `.msi`, or the portable `atmosphere.exe`. Installed copies keep themselves up to date.
 
-| Platform | Files |
-| --- | --- |
-| Windows | Setup `.exe`, `.msi`, or the portable `atmosphere.exe` |
-| macOS | `.dmg` (Apple Silicon and Intel) |
-| Linux | `.deb`, `.rpm`, `.AppImage` |
+> [!WARNING]
+> Atmosphere isn't code-signed yet, so Windows SmartScreen may say "Windows protected your PC", and some antivirus apps may flag it as a false positive. Choose **More info → Run anyway** to install. Every release is built from this repository by GitHub Actions, and in-app updates are signature-checked before they install.
 
 On first launch:
-1. Confirm the three rights statements. The Windows installer covers this on its licence page.
-2. Let Atmosphere set up its engine: [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org), downloaded from their official releases and checksum-verified. On macOS, install ffmpeg with `brew install ffmpeg`.
+1. Confirm the three rights statements. The installer covers this on its licence page.
+2. Let Atmosphere set up its engine: [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [ffmpeg](https://ffmpeg.org), downloaded from their official releases and checksum-verified.
 3. Add your music folders in **Settings → Library**, or paste a link.
 
 ### Build from source
-You'll need [Rust](https://rustup.rs). On Linux, also install the WebKitGTK dependencies:
-
-```bash
-sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
-```
-
-Run the app:
+You'll need Windows and [Rust](https://rustup.rs). Run the app:
 
 ```bash
 cargo run --release
@@ -200,13 +191,11 @@ cargo tauri build
 | `Delete` | Delete the selected songs (with confirmation) |
 | `Ctrl A` | Select all in the current list |
 
-On macOS, use `⌘` in place of `Ctrl`.
-
 ## Responsible use
 
 Atmosphere is for media you own or are allowed to keep.
 
-- **Before first use**, you agree to three statements about rights and responsibility. On Windows, that's the installer's licence page. The portable app, macOS and Linux ask once inside the app. **Each download** also asks for confirmation. The app's backend enforces both, not only the UI.
+- **Before first use**, you agree to three statements about rights and responsibility. The installer covers this on its licence page, and the portable app asks once inside the app. **Each download** also asks for confirmation. The app's backend enforces both, not only the UI.
 - It **never bypasses DRM or paywalls**, and skips preview-only media, the same way yt-dlp itself refuses encrypted formats.
 - **Artists recovering their own uploads** can enable downloads on the track and choose **Original file** to get the uploaded master.
 

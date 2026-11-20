@@ -118,7 +118,7 @@ function sleepMenu(e) {
     sleepActive() ? "-" : null,
     opt("15 minutes", 15), opt("30 minutes", 30), opt("45 minutes", 45), opt("1 hour", 60), opt("2 hours", 120),
     opt("End of this song", "song"),
-  ].filter(Boolean));
+  ].filter(Boolean), true);
 }
 
 function resumeMap() {

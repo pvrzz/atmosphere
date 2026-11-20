@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Instant};
 
-pub const BUILTIN_CLIENT_ID: &str = "";
+pub const BUILTIN_CLIENT_ID: &str = "1573218461658648768";
 pub const ASSET_LOGO: &str = "atmosphere";
 pub const ASSET_PAUSED: &str = "paused";
 const LOGO_PNG: &[u8] = include_bytes!("../icons/icon.png");
@@ -215,11 +215,11 @@ impl Worker {
             }
         }
         let wanted = match (&self.now, self.opts.cover) {
-            (Some(n), true) if !n.title.trim().is_empty() => Some((n.artist.clone(), n.title.clone())),
+            (Some(n), true) if !n.title.trim().is_empty() => Some((n.artist.clone(), n.title.clone(), n.album.clone())),
             _ => None,
         };
         let cover = match wanted {
-            Some((artist, title)) => self.cover_for(&artist, &title).await,
+            Some((artist, title, album)) => self.cover_for(&artist, &title, &album).await,
             None => None,
         };
         let act = self.now.as_ref().and_then(|n| activity(&self.opts, n, cover.as_deref(), now_ms()));
@@ -250,19 +250,13 @@ impl Worker {
         }
     }
 
-    async fn cover_for(&mut self, artist: &str, title: &str) -> Option<String> {
-        let key = format!("{}\u{1}{}", crate::artistinfo::norm(artist), crate::artistinfo::norm(title));
+    async fn cover_for(&mut self, artist: &str, title: &str, album: &str) -> Option<String> {
+        let norm = crate::artistinfo::norm;
+        let key = format!("{}\u{1}{}\u{1}{}", norm(artist), norm(title), norm(album));
         if let Some(hit) = self.covers.get(&key) {
             return hit.clone();
         }
-        let first = artist.split([',', '&']).next().unwrap_or(artist).trim();
-        let q = if first.is_empty() { format!("track:\"{title}\"") } else { format!("artist:\"{first}\" track:\"{title}\"") };
-        let url = format!("https://api.deezer.com/search?limit=5&q={}", crate::artistinfo::enc(&q));
-        let found = match timeout(Duration::from_secs(6), crate::artistinfo::get_json(&self.http, &url)).await {
-            Ok(Some(v)) => pick_cover(&v, first),
-            Ok(None) => None,
-            Err(_) => return None,
-        };
+        let found = timeout(Duration::from_secs(15), find_cover(&self.http, artist, title, album)).await.ok().flatten();
         self.covers.insert(key, found.clone());
         found
     }
@@ -276,11 +270,81 @@ fn now_ms() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+pub fn lead_artist(artist: &str) -> String {
+    static SPLIT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\s*(?:,|;|\s(?:feat\.?|ft\.?|featuring|with|x)\s)").unwrap());
+    SPLIT.split(artist.trim()).next().unwrap_or_default().trim().to_string()
+}
+
+pub fn clean_title(title: &str) -> String {
+    static NOISE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(?i)\s*(?:[\(\[][^\)\]]*(?:feat|ft\.|with |remaster|version|edit|mix|live|explicit|clean|bonus|deluxe|official|audio|video|lyric)[^\)\]]*[\)\]]|\s-\s.*(?:remaster|version|edit|mix|live).*$|\s(?:feat\.?|ft\.?|featuring)\s.*$)").unwrap()
+    });
+    let t = NOISE.replace_all(title.trim(), "").trim().to_string();
+    if t.is_empty() { title.trim().to_string() } else { t }
+}
+
+fn same_artist(found: &str, want: &str) -> bool {
+    let (f, w) = (crate::artistinfo::norm(found), crate::artistinfo::norm(want));
+    w.is_empty() || (!f.is_empty() && (f == w || f.contains(&w) || w.contains(&f)))
+}
+
+pub fn pick_album_cover(v: &Value, artist: &str, album: &str) -> Option<String> {
+    let want = crate::artistinfo::norm(album);
+    v["data"].as_array()?.iter().find_map(|a| {
+        let title = crate::artistinfo::norm(a["title"].as_str().unwrap_or_default());
+        let ok = same_artist(a["artist"]["name"].as_str().unwrap_or_default(), artist) && !want.is_empty() && (title == want || title.starts_with(&want) || want.starts_with(&title));
+        let url = a["cover_xl"].as_str().or_else(|| a["cover_big"].as_str())?;
+        (ok && url.starts_with("https://")).then(|| url.to_string())
+    })
+}
+
+pub fn pick_itunes(v: &Value, artist: &str, title: &str, album: &str) -> Option<String> {
+    let (t, al) = (crate::artistinfo::norm(title), crate::artistinfo::norm(album));
+    let list = v["results"].as_array()?;
+    let ok = |r: &&Value| same_artist(r["artistName"].as_str().unwrap_or_default(), artist);
+    let by_song = list.iter().filter(ok).find(|r| {
+        let name = crate::artistinfo::norm(&clean_title(r["trackName"].as_str().unwrap_or_default()));
+        !t.is_empty() && (name == t || name.starts_with(&t) || t.starts_with(&name))
+    });
+    let by_album = || list.iter().filter(ok).find(|r| !al.is_empty() && crate::artistinfo::norm(r["collectionName"].as_str().unwrap_or_default()).starts_with(&al));
+    let art = by_song.or_else(by_album)?["artworkUrl100"].as_str()?;
+    art.starts_with("https://").then(|| art.replace("100x100bb", "1000x1000bb"))
+}
+
+async fn find_cover(http: &reqwest::Client, artist: &str, title: &str, album: &str) -> Option<String> {
+    use crate::artistinfo::{enc, get_json};
+    let lead = lead_artist(artist);
+    let song = clean_title(title);
+    let album = album.trim();
+    let field = |k: &str, v: &str| if v.is_empty() { String::new() } else { format!("{k}:\"{v}\" ") };
+    let deezer = |q: String| format!("https://api.deezer.com/search{q}");
+    if let Some(v) = get_json(http, &deezer(format!("?limit=10&q={}", enc(&format!("{}{}", field("artist", &lead), field("track", &song)))))).await {
+        if let Some(u) = pick_cover(&v, &lead) {
+            return Some(u);
+        }
+    }
+    if !album.is_empty() {
+        if let Some(v) = get_json(http, &deezer(format!("/album?limit=10&q={}", enc(&format!("{}{}", field("artist", &lead), field("album", &clean_title(album))))))).await {
+            if let Some(u) = pick_album_cover(&v, &lead, &clean_title(album)) {
+                return Some(u);
+            }
+        }
+    }
+    let term = enc(&format!("{lead} {song}"));
+    if let Some(v) = get_json(http, &format!("https://itunes.apple.com/search?media=music&entity=song&limit=15&term={term}")).await {
+        if let Some(u) = pick_itunes(&v, &lead, &song, album) {
+            return Some(u);
+        }
+    }
+    let loose = get_json(http, &deezer(format!("?limit=10&q={}", enc(&format!("{lead} {song}"))))).await?;
+    pick_cover(&loose, &lead)
+}
+
 pub fn pick_cover(v: &Value, artist: &str) -> Option<String> {
     let want = crate::artistinfo::norm(artist);
     v["data"].as_array()?.iter().find_map(|t| {
-        let name = crate::artistinfo::norm(t["artist"]["name"].as_str().unwrap_or_default());
-        let ok = want.is_empty() || name == want || name.contains(&want) || want.contains(&name);
+        let _ = &want;
+        let ok = same_artist(t["artist"]["name"].as_str().unwrap_or_default(), artist);
         let url = t["album"]["cover_xl"].as_str().or_else(|| t["album"]["cover_big"].as_str())?;
         (ok && url.starts_with("https://")).then(|| url.to_string())
     })
@@ -361,25 +425,9 @@ async fn read_frame(io: &mut Box<dyn Io>) -> std::io::Result<(u32, Value)> {
 }
 
 async fn open_socket() -> Option<Box<dyn Io>> {
-    #[cfg(windows)]
     for i in 0..10 {
         if let Ok(p) = tokio::net::windows::named_pipe::ClientOptions::new().open(format!(r"\\.\pipe\discord-ipc-{i}")) {
             return Some(Box::new(p));
-        }
-    }
-    #[cfg(unix)]
-    {
-        let mut dirs: Vec<std::path::PathBuf> = ["XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP"].iter().filter_map(|k| std::env::var_os(k).map(Into::into)).collect();
-        dirs.push("/tmp".into());
-        for dir in dirs {
-            for sub in ["", "app/com.discordapp.Discord", "snap.discord", ".flatpak/dev.vencord.Vesktop/xdg-run"] {
-                for i in 0..10 {
-                    let path = dir.join(sub).join(format!("discord-ipc-{i}"));
-                    if let Ok(s) = tokio::net::UnixStream::connect(&path).await {
-                        return Some(Box::new(s));
-                    }
-                }
-            }
         }
     }
     None
@@ -447,15 +495,42 @@ const SETUP_NOTES: &str = "Atmosphere on Discord: using your own Discord applica
    The name you give it is what Discord shows as \"Listening to <name>\".
 2. On the application's General Information page, copy the Application ID
    and paste it into Atmosphere > Settings > Discord > Your own Discord app.
-3. Open Rich Presence > Art Assets and upload both images from this folder.
-   Keep their names exactly as they are (atmosphere and paused), because
-   Atmosphere asks Discord for them by name.
-4. New art can take a few minutes to show up on Discord.
+3. Open Rich Presence > Art Assets. Under Rich Presence Assets, choose
+   Add Image(s) and upload atmosphere.png and paused.png. Keep their names
+   exactly as they are, because Atmosphere asks Discord for them by name.
+4. Optional: under Rich Presence Invite Image, upload invite-cover.png as
+   the Cover Image (1024x576).
+5. New art can take a few minutes to show up on Discord.
 ";
+
+fn cover_png() -> Vec<u8> {
+    let (w, h) = (1024u32, 576u32);
+    let (from, to, glow): ([f32; 3], [f32; 3], [f32; 3]) = ([13.0, 15.0, 31.0], [42.0, 47.0, 143.0], [154.0, 164.0, 255.0]);
+    let mut img = image::RgbaImage::from_fn(w, h, |x, y| {
+        let t = (x as f32 / w as f32 * 0.6 + y as f32 / h as f32 * 0.4).clamp(0.0, 1.0);
+        let (dx, dy) = (x as f32 - w as f32 / 2.0, (y as f32 - h as f32 / 2.0) * 1.4);
+        let g = (1.0 - (dx * dx + dy * dy).sqrt() / 420.0).clamp(0.0, 1.0).powi(2) * 0.28;
+        let c = |i: usize| (from[i] + (to[i] - from[i]) * t) * (1.0 - g) + glow[i] * g;
+        image::Rgba([c(0) as u8, c(1) as u8, c(2) as u8, 255])
+    });
+    if let Ok(logo) = image::load_from_memory(LOGO_PNG) {
+        let size = 300;
+        let logo = image::imageops::resize(&logo.to_rgba8(), size, size, image::imageops::FilterType::Lanczos3);
+        image::imageops::overlay(&mut img, &logo, ((w - size) / 2) as i64, ((h - size) / 2) as i64);
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).expect("png");
+    out.into_inner()
+}
 
 pub fn write_assets(dir: &Path) -> anyhow::Result<Vec<String>> {
     std::fs::create_dir_all(dir)?;
-    let files = [(format!("{ASSET_LOGO}.png"), LOGO_PNG.to_vec()), (format!("{ASSET_PAUSED}.png"), badge_png(1024)), ("How to set up.txt".to_string(), SETUP_NOTES.as_bytes().to_vec())];
+    let files = [
+        (format!("{ASSET_LOGO}.png"), LOGO_PNG.to_vec()),
+        (format!("{ASSET_PAUSED}.png"), badge_png(1024)),
+        ("invite-cover.png".to_string(), cover_png()),
+        ("How to set up.txt".to_string(), SETUP_NOTES.as_bytes().to_vec()),
+    ];
     let mut written = Vec::new();
     for (name, bytes) in files {
         let path = dir.join(&name);
@@ -523,10 +598,58 @@ mod tests {
     }
 
     #[test]
+    fn cleans_titles_and_finds_covers_from_apple_music_too() {
+        assert_eq!(lead_artist("Rihanna, The Weeknd feat. Drake"), "Rihanna");
+        assert_eq!(lead_artist("Mumford & Sons"), "Mumford & Sons");
+        assert_eq!(lead_artist("Calvin Harris x Dua Lipa"), "Calvin Harris");
+        assert_eq!(clean_title("Get Lucky (feat. Pharrell Williams) [Radio Edit]"), "Get Lucky");
+        assert_eq!(clean_title("Bohemian Rhapsody - Remastered 2011"), "Bohemian Rhapsody");
+        assert_eq!(clean_title("Love Story (Taylor's Version)"), "Love Story");
+        assert_eq!(clean_title("(Untitled)"), "(Untitled)");
+        let it = json!({ "results": [
+            { "artistName": "Someone", "trackName": "Woo", "collectionName": "X", "artworkUrl100": "https://is1-ssl.mzstatic.com/a/100x100bb.jpg" },
+            { "artistName": "Rihanna", "trackName": "Woo", "collectionName": "ANTI", "artworkUrl100": "https://is1-ssl.mzstatic.com/b/100x100bb.jpg" }
+        ]});
+        assert_eq!(pick_itunes(&it, "Rihanna", "Woo", "").as_deref(), Some("https://is1-ssl.mzstatic.com/b/1000x1000bb.jpg"));
+        assert_eq!(pick_itunes(&it, "Nobody", "Woo", ""), None);
+        let al = json!({ "data": [ { "title": "ANTI (Deluxe)", "artist": { "name": "Rihanna" }, "cover_xl": "https://e/anti.jpg" } ] });
+        assert_eq!(pick_album_cover(&al, "Rihanna", "ANTI").as_deref(), Some("https://e/anti.jpg"));
+        assert_eq!(pick_album_cover(&al, "Drake", "ANTI"), None);
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_finds_covers() {
+        let http = reqwest::Client::builder().user_agent("atmosphere/test").build().unwrap();
+        for (a, t, al) in [("Rihanna, The Weeknd, Travis Scott, Jeremih", "Woo", "ANTI"), ("Daft Punk", "Get Lucky (feat. Pharrell Williams) [Radio Edit]", ""), ("Lana Del Rey", "Video Games - Remastered", "Born To Die")] {
+            let c = find_cover(&http, a, t, al).await;
+            eprintln!("{t}: {c:?}");
+            assert!(c.is_some_and(|u| u.starts_with("https://")), "no cover for {t}");
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn live_discord_echo() {
+        let id = std::env::var("ATMO_DISCORD_ID").expect("set ATMO_DISCORD_ID");
+        let Ok((mut conn, user)) = connect(&id).await else { panic!("couldn't connect") };
+        eprintln!("user: {user:?}");
+        let now = NowPlaying { title: "Woo".into(), artist: "Rihanna".into(), album: "ANTI".into(), duration_ms: 236_000, position_ms: 1_000, playing: true };
+        let act = activity(&Options { enabled: true, client_id: id.clone(), cover: true, paused: true, status: "artist".into() }, &now, None, now_ms());
+        write_frame(&mut conn.io, 1, &json!({ "cmd": "SET_ACTIVITY", "args": { "pid": std::process::id(), "activity": act }, "nonce": "t1" })).await.unwrap();
+        let (_, reply) = read_frame(&mut conn.io).await.unwrap();
+        eprintln!("echo: {}", serde_json::to_string(&reply["data"]).unwrap());
+        write_frame(&mut conn.io, 1, &json!({ "cmd": "SET_ACTIVITY", "args": { "pid": std::process::id(), "activity": null }, "nonce": "t2" })).await.unwrap();
+        let _ = read_frame(&mut conn.io).await;
+    }
+
+    #[test]
     fn writes_the_art_assets() {
         let dir = std::env::temp_dir().join(format!("atmo-discord-{}", std::process::id()));
         let files = write_assets(&dir).unwrap();
-        assert_eq!(files.len(), 3);
+        assert_eq!(files.len(), 4);
+        let cover = image::open(dir.join("invite-cover.png")).unwrap();
+        assert_eq!((cover.width(), cover.height()), (1024, 576));
         let badge = image::open(dir.join("paused.png")).unwrap();
         assert_eq!((badge.width(), badge.height()), (1024, 1024));
         let logo = image::open(dir.join("atmosphere.png")).unwrap();

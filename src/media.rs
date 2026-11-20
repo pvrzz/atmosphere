@@ -473,7 +473,6 @@ fn browser_label(id: &str) -> String {
         "brave" => "Brave".into(),
         "opera" => "Opera".into(),
         "vivaldi" => "Vivaldi".into(),
-        "safari" => "Safari".into(),
         "whale" => "Whale".into(),
         _ => "your browser".into(),
     }

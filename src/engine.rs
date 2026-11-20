@@ -7,10 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
-#[cfg(windows)]
 const EXE: &str = ".exe";
-#[cfg(not(windows))]
-const EXE: &str = "";
 
 const YTDLP_RELEASE: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download";
 const FFMPEG_RELEASE: &str = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest";
@@ -53,16 +50,7 @@ pub fn temp_root() -> PathBuf {
 }
 
 fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    if cfg!(unix) {
-        let home = dirs::home_dir().unwrap_or_default();
-        for extra in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/snap/bin", "/opt/local/bin"] {
-            dirs.push(PathBuf::from(extra));
-        }
-        dirs.push(home.join(".local/bin"));
-        dirs.push(home.join("bin"));
-    }
-    dirs
+    std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default()
 }
 
 fn on_path(name: &str) -> Option<PathBuf> {
@@ -89,7 +77,6 @@ pub fn find_tool(name: &str) -> Option<PathBuf> {
 pub fn command(program: &Path) -> Command {
     let mut cmd = Command::new(program);
     cmd.stdin(Stdio::null()).env("PYTHONIOENCODING", "utf-8").env("PYTHONUTF8", "1");
-    #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
     cmd
 }
@@ -133,22 +120,11 @@ pub async fn status(ytdlp_custom: &str, ffmpeg_custom: &str) -> ToolStatus {
 }
 
 fn ytdlp_asset() -> &'static str {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", _) => "yt-dlp.exe",
-        ("macos", _) => "yt-dlp_macos",
-        ("linux", "aarch64") => "yt-dlp_linux_aarch64",
-        _ => "yt-dlp_linux",
-    }
+    "yt-dlp.exe"
 }
 
 fn ffmpeg_asset() -> Option<&'static str> {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("windows", "aarch64") => Some("ffmpeg-master-latest-winarm64-gpl.zip"),
-        ("windows", _) => Some("ffmpeg-master-latest-win64-gpl.zip"),
-        ("linux", "aarch64") => Some("ffmpeg-master-latest-linuxarm64-gpl.tar.xz"),
-        ("linux", "x86_64") => Some("ffmpeg-master-latest-linux64-gpl.tar.xz"),
-        _ => None,
-    }
+    Some(if std::env::consts::ARCH == "aarch64" { "ffmpeg-master-latest-winarm64-gpl.zip" } else { "ffmpeg-master-latest-win64-gpl.zip" })
 }
 
 fn wanted(path: &str) -> Option<String> {
@@ -157,7 +133,7 @@ fn wanted(path: &str) -> Option<String> {
     (path.contains("/bin/") && (file == format!("ffmpeg{EXE}") || file == format!("ffprobe{EXE}"))).then(|| file.to_string())
 }
 
-fn extract_ffmpeg(asset: &str, data: Vec<u8>, dir: &Path) -> Result<PathBuf> {
+fn extract_ffmpeg(data: Vec<u8>, dir: &Path) -> Result<PathBuf> {
     let mut found = None;
     let mut keep = |file: String, buf: Vec<u8>| -> Result<()> {
         let dest = dir.join(&file);
@@ -167,29 +143,13 @@ fn extract_ffmpeg(asset: &str, data: Vec<u8>, dir: &Path) -> Result<PathBuf> {
         }
         Ok(())
     };
-    if asset.ends_with(".zip") {
-        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))?;
-        for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)?;
-            if let Some(file) = wanted(&entry.name()?) {
-                let mut buf = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut buf)?;
-                keep(file, buf)?;
-            }
-        }
-    } else {
-        let mut tar_bytes = Vec::new();
-        lzma_rs::xz_decompress(&mut std::io::BufReader::new(std::io::Cursor::new(data)), &mut tar_bytes)
-            .map_err(|e| anyhow!("Couldn't unpack ffmpeg ({e})"))?;
-        let mut archive = tar::Archive::new(std::io::Cursor::new(tar_bytes));
-        for entry in archive.entries()? {
-            let mut entry = entry?;
-            let name = entry.path()?.to_string_lossy().into_owned();
-            if let Some(file) = wanted(&name) {
-                let mut buf = Vec::new();
-                entry.read_to_end(&mut buf)?;
-                keep(file, buf)?;
-            }
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(data))?;
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        if let Some(file) = wanted(&entry.name()?) {
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut buf)?;
+            keep(file, buf)?;
         }
     }
     found.ok_or_else(|| anyhow!("ffmpeg wasn't in the downloaded archive"))
@@ -232,11 +192,6 @@ fn write_exec(path: &Path, data: &[u8]) -> Result<()> {
     }
     let tmp = path.with_extension("download");
     std::fs::write(&tmp, data)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    }
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
@@ -252,18 +207,12 @@ pub async fn install_ytdlp(http: &reqwest::Client, progress: impl FnMut(u64, Opt
 }
 
 pub async fn install_ffmpeg(http: &reqwest::Client, progress: impl FnMut(u64, Option<u64>)) -> Result<PathBuf> {
-    let Some(asset) = ffmpeg_asset() else {
-        bail!(if cfg!(target_os = "macos") {
-            "On macOS, install ffmpeg with Homebrew (`brew install ffmpeg`). Atmosphere finds it automatically."
-        } else {
-            "Install ffmpeg with your package manager, then restart Atmosphere."
-        });
-    };
+    let Some(asset) = ffmpeg_asset() else { bail!("ffmpeg isn't available for this computer.") };
     let sums = http.get(format!("{FFMPEG_RELEASE}/checksums.sha256")).send().await?.error_for_status()?.text().await?;
     let data = fetch(http, &format!("{FFMPEG_RELEASE}/{asset}"), progress).await?;
     verify(&data, &sums, asset)?;
     let dir = bin_dir();
-    tokio::task::spawn_blocking(move || extract_ffmpeg(asset, data, &dir)).await?
+    tokio::task::spawn_blocking(move || extract_ffmpeg(data, &dir)).await?
 }
 
 pub async fn update_ytdlp(path: &Path) -> Result<String> {
@@ -289,9 +238,9 @@ mod tests {
 
     #[test]
     fn finds_checksums() {
-        let sums = "abc123  yt-dlp.exe\nDEF456 *yt-dlp_linux\n";
+        let sums = "abc123  yt-dlp.exe\nDEF456 *ffmpeg.zip\n";
         assert_eq!(expected_hash(sums, "yt-dlp.exe").as_deref(), Some("abc123"));
-        assert_eq!(expected_hash(sums, "yt-dlp_linux").as_deref(), Some("def456"));
+        assert_eq!(expected_hash(sums, "ffmpeg.zip").as_deref(), Some("def456"));
         assert!(expected_hash(sums, "nope").is_none());
         let data = b"hello";
         let good = format!("{}  file.bin", Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect::<String>());

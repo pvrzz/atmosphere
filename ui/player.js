@@ -1,5 +1,5 @@
 /* atmosphere · player.js · Audio engine: two-deck gapless playback, crossfade, volume levelling, queue, EQ and effects, media keys and resume. */
-const MEDIA_BASE = /Windows/.test(navigator.userAgent) ? "http://atmo.localhost/" : "atmo://localhost/";
+const MEDIA_BASE = "http://atmo.localhost/";
 const mediaUrl = (kind, id) => `${MEDIA_BASE}${kind}/${encodeURIComponent(id)}`;
 const artUrl = (key) => (key ? mediaUrl("a", key) : null);
 
